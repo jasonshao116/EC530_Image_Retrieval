@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "5aef66e0-a6ee-4413-b81b-b8c3b4da9d7c",
+  "event_name": "retrieval.requested",
+  "event_version": "1.0.0",
+  "occurred_at": "2026-04-14T20:05:00Z",
+  "source": "search-api",
+  "trace_id": "trace-search-001",
+  "payload": {
+    "request_id": "5c3046b6-e7bd-4277-904e-a71957f69989",
+    "query_type": "text",
+    "query_text": "red brick academic building",
+    "top_k": 3,
+    "requested_by": "student@example.edu",
+    "filters": {
+      "campus": "BU",
+      "public_only": true
+    }
+  }
+}

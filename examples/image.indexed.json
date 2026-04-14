@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "f77b1048-152a-46a7-a3d7-cd1767e35f7f",
+  "event_name": "image.indexed",
+  "event_version": "1.0.0",
+  "occurred_at": "2026-04-14T20:01:10Z",
+  "source": "indexer-service",
+  "trace_id": "trace-upload-001",
+  "payload": {
+    "image_id": "80253575-f761-4a68-a20f-75a66dcf0c88",
+    "index_name": "image-embeddings-v1",
+    "embedding_model": "clip-vit-base-patch32",
+    "embedding_dimension": 512,
+    "indexed_at": "2026-04-14T20:01:09Z"
+  }
+}

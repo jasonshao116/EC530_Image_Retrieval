@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "0f889d66-b963-4614-b055-38d56ec4c9be",
+  "event_name": "image.uploaded",
+  "event_version": "1.0.0",
+  "occurred_at": "2026-04-14T20:00:00Z",
+  "source": "api-gateway",
+  "trace_id": "trace-upload-001",
+  "payload": {
+    "image": {
+      "image_id": "80253575-f761-4a68-a20f-75a66dcf0c88",
+      "storage_uri": "s3://ec530-images/dataset/campus-001.jpg",
+      "content_type": "image/jpeg",
+      "width": 1920,
+      "height": 1080,
+      "uploaded_by": "student@example.edu",
+      "tags": [
+        "campus",
+        "outdoor",
+        "building"
+      ]
+    }
+  }
+}

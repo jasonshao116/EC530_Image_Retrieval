@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/events.schema.json",
+  "title": "EC530 Image Retrieval Event Schema",
+  "description": "Event envelope and payload contracts for the image retrieval pipeline.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ImageUploadedEvent"
+    },
+    {
+      "$ref": "#/$defs/ImageIndexedEvent"
+    },
+    {
+      "$ref": "#/$defs/RetrievalRequestedEvent"
+    },
+    {
+      "$ref": "#/$defs/RetrievalCompletedEvent"
+    }
+  ],
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "EmbeddingModel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "EventEnvelopeBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "event_id",
+        "event_name",
+        "event_version",
+        "occurred_at",
+        "source",
+        "payload"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "event_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "event_name": {
+          "type": "string"
+        },
+        "event_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "ImageMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_id",
+        "storage_uri",
+        "content_type",
+        "width",
+        "height",
+        "uploaded_by"
+      ],
+      "properties": {
+        "image_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "storage_uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_type": {
+          "type": "string",
+          "pattern": "^image\\/"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "uploaded_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "ImageUploadedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "$ref": "#/$defs/ImageMetadata"
+        }
+      }
+    },
+    "ImageIndexedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_id",
+        "index_name",
+        "embedding_model",
+        "embedding_dimension",
+        "indexed_at"
+      ],
+      "properties": {
+        "image_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "index_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "embedding_model": {
+          "$ref": "#/$defs/EmbeddingModel"
+        },
+        "embedding_dimension": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "indexed_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RetrievalRequestedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "query_type",
+        "top_k",
+        "requested_by"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "query_type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "image"
+          ]
+        },
+        "query_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query_image_uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requested_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "filters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "array"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "query_type": {
+                "const": "text"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "query_text"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "query_type": {
+                "const": "image"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "query_image_uri"
+            ]
+          }
+        }
+      ]
+    },
+    "RetrievalMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_id",
+        "score",
+        "rank"
+      ],
+      "properties": {
+        "image_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "score": {
+          "type": "number"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "storage_uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "RetrievalCompletedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "latency_ms",
+        "result_count",
+        "results"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "result_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RetrievalMatch"
+          }
+        }
+      }
+    },
+    "ImageUploadedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/EventEnvelopeBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event_name": {
+              "const": "image.uploaded"
+            },
+            "event_version": {
+              "const": "1.0.0"
+            },
+            "payload": {
+              "$ref": "#/$defs/ImageUploadedPayload"
+            }
+          }
+        }
+      ]
+    },
+    "ImageIndexedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/EventEnvelopeBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event_name": {
+              "const": "image.indexed"
+            },
+            "event_version": {
+              "const": "1.0.0"
+            },
+            "payload": {
+              "$ref": "#/$defs/ImageIndexedPayload"
+            }
+          }
+        }
+      ]
+    },
+    "RetrievalRequestedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/EventEnvelopeBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event_name": {
+              "const": "retrieval.requested"
+            },
+            "event_version": {
+              "const": "1.0.0"
+            },
+            "payload": {
+              "$ref": "#/$defs/RetrievalRequestedPayload"
+            }
+          }
+        }
+      ]
+    },
+    "RetrievalCompletedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/EventEnvelopeBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event_name": {
+              "const": "retrieval.completed"
+            },
+            "event_version": {
+              "const": "1.0.0"
+            },
+            "payload": {
+              "$ref": "#/$defs/RetrievalCompletedPayload"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

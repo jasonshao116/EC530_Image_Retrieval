@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "c4831c7c-07f6-4c12-a988-65c53147a1dd",
+  "event_name": "retrieval.completed",
+  "event_version": "1.0.0",
+  "occurred_at": "2026-04-14T20:05:01Z",
+  "source": "retrieval-service",
+  "trace_id": "trace-search-001",
+  "payload": {
+    "request_id": "5c3046b6-e7bd-4277-904e-a71957f69989",
+    "latency_ms": 148,
+    "result_count": 3,
+    "results": [
+      {
+        "image_id": "80253575-f761-4a68-a20f-75a66dcf0c88",
+        "score": 0.9821,
+        "rank": 1,
+        "storage_uri": "s3://ec530-images/dataset/campus-001.jpg"
+      },
+      {
+        "image_id": "b06fb9f8-49e0-46bb-94d3-cce55c4ba38a",
+        "score": 0.9474,
+        "rank": 2,
+        "storage_uri": "s3://ec530-images/dataset/campus-014.jpg"
+      },
+      {
+        "image_id": "cfe9bd53-50bf-4f8d-8d78-99ca030c8801",
+        "score": 0.9303,
+        "rank": 3,
+        "storage_uri": "s3://ec530-images/dataset/campus-112.jpg"
+      }
+    ]
+  }
+}
