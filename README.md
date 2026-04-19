@@ -1,26 +1,27 @@
 # EC530_Image_Retrieval
 
-## Push 2: Event Schema
+This repository contains an event-driven image retrieval prototype. It combines
+the Push 2 event schema with the Push 3 executable validation and local
+retrieval pipeline.
 
-This repository now includes a first-pass event contract for an image retrieval
-system. The schema is designed around a simple event envelope with strongly
-typed payloads for the core pipeline stages:
+The system models four core pipeline stages:
 
 - `image.uploaded`
 - `image.indexed`
 - `retrieval.requested`
 - `retrieval.completed`
 
-The schema files live in `/schemas`, and sample events live in `/examples`.
+Each stage uses a shared event envelope, a strongly typed payload contract, and
+schema validation before events are accepted or emitted.
 
-## Push 3: Validation and Local Retrieval Pipeline
+## What It Includes
 
-Push 3 adds executable code around the event contract:
-
-- validates event JSON files against `/schemas/events.schema.json`
-- runs a deterministic in-memory image retrieval demo
-- emits schema-valid events for upload, indexing, retrieval request, and retrieval completion
-- includes unit tests for the examples and retrieval pipeline
+- Versioned JSON Schema for all supported events
+- Sample event JSON files for each pipeline stage
+- JSON Schema validation helpers
+- Deterministic in-memory image indexing and retrieval
+- CLI commands for validation and demo retrieval
+- Unit tests for the examples and retrieval pipeline
 
 ## Setup
 
@@ -37,7 +38,7 @@ Install dependencies:
 python3 -m pip install -r requirements.txt
 ```
 
-## Run Push 3
+## Run the Project
 
 Validate the sample events:
 
@@ -57,17 +58,27 @@ Run the tests:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-## Files
+## Project Structure
 
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
 - `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
-- `/tests/test_push3_pipeline.py`: Push 3 unit tests
+- `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/examples/image.uploaded.json`: sample upload event
 - `/examples/image.indexed.json`: sample indexing event
 - `/examples/retrieval.requested.json`: sample retrieval request event
 - `/examples/retrieval.completed.json`: sample retrieval result event
+
+## Pipeline Flow
+
+1. An image is uploaded into storage and represented as an `image.uploaded`
+   event.
+2. The image metadata is embedded and stored in the in-memory index, producing
+   an `image.indexed` event.
+3. A user submits a text retrieval query through a `retrieval.requested` event.
+4. The retrieval pipeline ranks indexed images and emits a
+   `retrieval.completed` event with scored matches.
 
 ## Event Envelope
 
@@ -81,6 +92,12 @@ Every event uses the same top-level envelope:
 - `source`: service or component that emitted the event
 - `trace_id`: optional identifier for correlating related events
 - `payload`: event-specific data
+
+## Implementation History
+
+- Push 2 added the shared event schema and example event documents.
+- Push 3 added executable validation, a local retrieval pipeline, a CLI demo,
+  and unit tests.
 
 ## Assumptions
 
