@@ -13,9 +13,57 @@ typed payloads for the core pipeline stages:
 
 The schema files live in `/schemas`, and sample events live in `/examples`.
 
+## Push 3: Validation and Local Retrieval Pipeline
+
+Push 3 adds executable code around the event contract:
+
+- validates event JSON files against `/schemas/events.schema.json`
+- runs a deterministic in-memory image retrieval demo
+- emits schema-valid events for upload, indexing, retrieval request, and retrieval completion
+- includes unit tests for the examples and retrieval pipeline
+
+## Setup
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+## Run Push 3
+
+Validate the sample events:
+
+```bash
+PYTHONPATH=src python3 -m image_retrieval.demo validate examples/*.json
+```
+
+Run the local retrieval demo:
+
+```bash
+PYTHONPATH=src python3 -m image_retrieval.demo demo --query "red brick campus building" --top-k 3
+```
+
+Run the tests:
+
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
 ## Files
 
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
+- `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
+- `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
+- `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
+- `/tests/test_push3_pipeline.py`: Push 3 unit tests
 - `/examples/image.uploaded.json`: sample upload event
 - `/examples/image.indexed.json`: sample indexing event
 - `/examples/retrieval.requested.json`: sample retrieval request event
