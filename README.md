@@ -83,8 +83,14 @@ Remove Python caches and test artifacts:
 make clean
 ```
 
+## CI
+
+GitHub Actions runs `make install` and `make all` automatically on every push
+and pull request using `.github/workflows/tests.yml`.
+
 ## Project Structure
 
+- `/.github/workflows/tests.yml`: GitHub Actions workflow for validation and tests
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
