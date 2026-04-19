@@ -1,12 +1,14 @@
-"""Command line demo for Push 3."""
+"""Command line tools for the image retrieval pushes."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .events import EventValidationError, load_event, load_schema, validate_event
+from .generator import generate_event_stream, write_events
 from .pipeline import ImageRetrievalPipeline
 
 
@@ -64,8 +66,28 @@ def run_demo(query: str, top_k: int) -> int:
     return 0
 
 
+def generate_command(
+    *,
+    image_count: int,
+    retrieval_count: int,
+    top_k: int,
+    seed: int | None,
+    output_format: str,
+    output_path: Path | None,
+) -> int:
+    events = generate_event_stream(
+        image_count=image_count,
+        retrieval_count=retrieval_count,
+        top_k=top_k,
+        seed=seed,
+    )
+    output = output_path if output_path else sys.stdout
+    write_events(events, output, output_format=output_format)
+    return 0
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Push 3 image retrieval tools")
+    parser = argparse.ArgumentParser(description="Image retrieval event tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     validate_parser = subparsers.add_parser("validate", help="validate event JSON files")
@@ -75,13 +97,30 @@ def main() -> int:
     demo_parser.add_argument("--query", default="red brick campus building")
     demo_parser.add_argument("--top-k", type=int, default=3)
 
+    generate_parser = subparsers.add_parser("generate", help="generate Push 5 synthetic events")
+    generate_parser.add_argument("--images", type=int, default=3, help="number of uploaded images to generate")
+    generate_parser.add_argument("--retrievals", type=int, default=2, help="number of retrieval requests to generate")
+    generate_parser.add_argument("--top-k", type=int, default=3)
+    generate_parser.add_argument("--seed", type=int, default=None, help="seed for repeatable generated images and queries")
+    generate_parser.add_argument("--format", choices=["json", "jsonl"], default="json")
+    generate_parser.add_argument("--output", type=Path, default=None, help="write generated events to a file")
+
     args = parser.parse_args()
     try:
         if args.command == "validate":
             return validate_command(args.paths)
         if args.command == "demo":
             return run_demo(args.query, args.top_k)
-    except EventValidationError as exc:
+        if args.command == "generate":
+            return generate_command(
+                image_count=args.images,
+                retrieval_count=args.retrievals,
+                top_k=args.top_k,
+                seed=args.seed,
+                output_format=args.format,
+                output_path=args.output,
+            )
+    except (EventValidationError, ValueError) as exc:
         parser.exit(1, f"{exc}\n")
     return 1
 

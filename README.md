@@ -2,7 +2,7 @@
 
 This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
-pipeline, and the Push 4 REST API.
+pipeline, the Push 4 REST API, and the Push 5 synthetic event generator.
 
 The system models four core pipeline stages:
 
@@ -22,6 +22,7 @@ schema validation before events are accepted or emitted.
 - Deterministic in-memory image indexing and retrieval
 - CLI commands for validation and demo retrieval
 - REST API for uploading images, searching images, and inspecting emitted events
+- Synthetic event generation for local testing and downstream consumers
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -59,6 +60,24 @@ Run the local retrieval demo:
 make demo
 ```
 
+Generate a Push 5 synthetic event stream:
+
+```bash
+make generate
+```
+
+Or write newline-delimited JSON for ingestion tools:
+
+```bash
+PYTHONPATH=src python3 -m image_retrieval.demo generate \
+  --images 5 \
+  --retrievals 3 \
+  --top-k 3 \
+  --seed 530 \
+  --format jsonl \
+  --output generated-events.jsonl
+```
+
 Run the tests:
 
 ```bash
@@ -94,10 +113,12 @@ and pull request using `.github/workflows/tests.yml`.
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
+- `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
 - `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
 - `/src/image_retrieval/api.py`: FastAPI REST API for Push 4
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
+- `/tests/test_push5_generator.py`: synthetic event generator unit tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -114,6 +135,8 @@ and pull request using `.github/workflows/tests.yml`.
 3. A user submits a text retrieval query through a `retrieval.requested` event.
 4. The retrieval pipeline ranks indexed images and emits a
    `retrieval.completed` event with scored matches.
+5. The Push 5 generator can synthesize the same event flow as either a JSON
+   array or newline-delimited JSON for repeatable local testing.
 
 ## API Endpoints
 
@@ -172,6 +195,8 @@ Every event uses the same top-level envelope:
   and unit tests.
 - Push 4 added a FastAPI service with upload, retrieval, health, and event
   inspection endpoints.
+- Push 5 added a synthetic event generator that emits schema-valid pipeline
+  event streams from the CLI or Python API.
 
 ## Assumptions
 
@@ -183,5 +208,4 @@ the current design assumes an event-driven image retrieval workflow:
 3. A user submits a retrieval query.
 4. The system returns ranked matches.
 
-If your course spec uses different event names or required fields, the schema is
-set up so we can adjust it quickly without needing to redesign the full layout.
+
