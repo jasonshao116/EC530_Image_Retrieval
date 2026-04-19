@@ -41,34 +41,46 @@ python3 -m pip install -r requirements.txt
 
 ## Run the Project
 
+Run validation, tests, and an API import check:
+
+```bash
+make all
+```
+
 Validate the sample events:
 
 ```bash
-PYTHONPATH=src python3 -m image_retrieval.demo validate examples/*.json
+make validate
 ```
 
 Run the local retrieval demo:
 
 ```bash
-PYTHONPATH=src python3 -m image_retrieval.demo demo --query "red brick campus building" --top-k 3
+make demo
 ```
 
 Run the tests:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+make test
 ```
 
 Start the Push 4 API:
 
 ```bash
-PYTHONPATH=src uvicorn image_retrieval.api:app --reload
+make api
 ```
 
 After the server starts, open the interactive API docs at:
 
 ```text
 http://127.0.0.1:8000/docs
+```
+
+Remove Python caches and test artifacts:
+
+```bash
+make clean
 ```
 
 ## Project Structure
@@ -80,6 +92,8 @@ http://127.0.0.1:8000/docs
 - `/src/image_retrieval/api.py`: FastAPI REST API for Push 4
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
+- `/Makefile`: common project commands for install, validation, tests, API, and cleanup
+- `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
 - `/examples/image.indexed.json`: sample indexing event
 - `/examples/retrieval.requested.json`: sample retrieval request event
