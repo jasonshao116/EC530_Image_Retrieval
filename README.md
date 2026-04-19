@@ -1,8 +1,8 @@
 # EC530_Image_Retrieval
 
 This repository contains an event-driven image retrieval prototype. It combines
-the Push 2 event schema with the Push 3 executable validation and local
-retrieval pipeline.
+the Push 2 event schema, the Push 3 executable validation and local retrieval
+pipeline, and the Push 4 REST API.
 
 The system models four core pipeline stages:
 
@@ -21,6 +21,7 @@ schema validation before events are accepted or emitted.
 - JSON Schema validation helpers
 - Deterministic in-memory image indexing and retrieval
 - CLI commands for validation and demo retrieval
+- REST API for uploading images, searching images, and inspecting emitted events
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -58,13 +59,27 @@ Run the tests:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
+Start the Push 4 API:
+
+```bash
+PYTHONPATH=src uvicorn image_retrieval.api:app --reload
+```
+
+After the server starts, open the interactive API docs at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
 ## Project Structure
 
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
 - `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
+- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
+- `/tests/test_push4_api.py`: API unit tests
 - `/examples/image.uploaded.json`: sample upload event
 - `/examples/image.indexed.json`: sample indexing event
 - `/examples/retrieval.requested.json`: sample retrieval request event
@@ -79,6 +94,43 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 3. A user submits a text retrieval query through a `retrieval.requested` event.
 4. The retrieval pipeline ranks indexed images and emits a
    `retrieval.completed` event with scored matches.
+
+## API Endpoints
+
+- `GET /health`: check service health and current in-memory index state
+- `POST /images`: upload image metadata and automatically index it
+- `POST /retrievals`: submit a text query and receive ranked image matches
+- `GET /events`: list schema-valid events emitted since the API started
+
+Example upload:
+
+```bash
+curl -X POST http://127.0.0.1:8000/images \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_id": "80253575-f761-4a68-a20f-75a66dcf0c88",
+    "storage_uri": "s3://ec530-images/dataset/campus-001.jpg",
+    "content_type": "image/jpeg",
+    "width": 1920,
+    "height": 1080,
+    "uploaded_by": "student@example.edu",
+    "tags": ["campus", "brick", "building"],
+    "trace_id": "trace-api-demo"
+  }'
+```
+
+Example retrieval:
+
+```bash
+curl -X POST http://127.0.0.1:8000/retrievals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "red brick campus building",
+    "top_k": 3,
+    "requested_by": "student@example.edu",
+    "trace_id": "trace-api-demo"
+  }'
+```
 
 ## Event Envelope
 
@@ -98,6 +150,8 @@ Every event uses the same top-level envelope:
 - Push 2 added the shared event schema and example event documents.
 - Push 3 added executable validation, a local retrieval pipeline, a CLI demo,
   and unit tests.
+- Push 4 added a FastAPI service with upload, retrieval, health, and event
+  inspection endpoints.
 
 ## Assumptions
 

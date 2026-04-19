@@ -1,4 +1,4 @@
-"""Small event-driven image retrieval pipeline for Push 3."""
+"""Small event-driven image retrieval pipeline."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 
 
 class InMemoryImageIndex:
-    """Deterministic local index used for the Push 3 demo and tests."""
+    """Deterministic local index used for the demo, API, and tests."""
 
     def __init__(self, embedding_dimension: int = DEFAULT_EMBEDDING_DIMENSION) -> None:
         self.embedding_dimension = embedding_dimension
@@ -86,6 +86,10 @@ class InMemoryImageIndex:
         )
         self._images[image_id] = image
         self._vectors[image_id] = _embed_text(searchable_text, self.embedding_dimension)
+
+    @property
+    def image_count(self) -> int:
+        return len(self._images)
 
     def search(self, query: str, top_k: int) -> list[dict[str, Any]]:
         query_vector = _embed_text(query, self.embedding_dimension)
@@ -112,8 +116,9 @@ class InMemoryImageIndex:
 class ImageRetrievalPipeline:
     """Consumes schema-valid events and emits downstream retrieval events."""
 
-    def __init__(self, index: InMemoryImageIndex | None = None) -> None:
+    def __init__(self, index: InMemoryImageIndex | None = None, source: str = "image-retrieval-service") -> None:
         self.index = index or InMemoryImageIndex()
+        self.source = source
         self.events: list[dict[str, Any]] = []
 
     def upload_image(
@@ -122,7 +127,7 @@ class ImageRetrievalPipeline:
         *,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        event = _event("image.uploaded", "push3-demo", {"image": image}, trace_id)
+        event = _event("image.uploaded", self.source, {"image": image}, trace_id)
         self.events.append(event)
         return event
 
@@ -133,7 +138,7 @@ class ImageRetrievalPipeline:
 
         event = _event(
             "image.indexed",
-            "push3-demo",
+            self.source,
             {
                 "image_id": image["image_id"],
                 "index_name": DEFAULT_INDEX_NAME,
@@ -156,7 +161,7 @@ class ImageRetrievalPipeline:
     ) -> dict[str, Any]:
         event = _event(
             "retrieval.requested",
-            "push3-demo",
+            self.source,
             {
                 "request_id": str(uuid.uuid4()),
                 "query_type": "text",
@@ -178,7 +183,7 @@ class ImageRetrievalPipeline:
 
         event = _event(
             "retrieval.completed",
-            "push3-demo",
+            self.source,
             {
                 "request_id": payload["request_id"],
                 "latency_ms": latency_ms,
