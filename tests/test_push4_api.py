@@ -20,7 +20,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"status": "ok", "indexed_images": 0, "event_count": 0},
+            {"status": "ok", "indexed_images": 0, "stored_images": 0, "event_count": 0},
         )
 
     def test_upload_and_retrieve_images(self) -> None:

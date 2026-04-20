@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .events import EventValidationError
 from .pipeline import ImageRetrievalPipeline
+from .storage import DocumentNotFoundError
 
 
 class ImageMetadataRequest(BaseModel):
@@ -34,6 +35,14 @@ class UploadInferenceRequest(ImageMetadataRequest):
     requested_by: str = Field(default="student@example.edu", min_length=1)
 
 
+class AnnotationRequest(BaseModel):
+    label: str = Field(min_length=1)
+    annotator: str = Field(min_length=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    notes: str | None = Field(default=None, min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
     app = FastAPI(
         title="EC530 Image Retrieval API",
@@ -48,6 +57,7 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
         return {
             "status": "ok",
             "indexed_images": current_pipeline.index.image_count,
+            "stored_images": current_pipeline.document_store.document_count,
             "event_count": len(current_pipeline.events),
         }
 
@@ -65,6 +75,48 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             "image_id": image["image_id"],
             "upload_event": upload_event,
             "indexed_event": indexed_event,
+        }
+
+    @app.get("/images")
+    def list_images() -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        images = current_pipeline.document_store.list_images()
+        return {
+            "image_count": len(images),
+            "images": images,
+        }
+
+    @app.get("/images/{image_id}")
+    def get_image(image_id: str) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            return current_pipeline.document_store.get_image(image_id)
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/images/{image_id}/annotations")
+    def add_annotation(image_id: str, request: AnnotationRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            annotation = current_pipeline.document_store.add_annotation(
+                image_id,
+                request.model_dump(exclude_none=True),
+            )
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return annotation
+
+    @app.get("/images/{image_id}/annotations")
+    def list_annotations(image_id: str) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            annotations = current_pipeline.document_store.list_annotations(image_id)
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "image_id": image_id,
+            "annotation_count": len(annotations),
+            "annotations": annotations,
         }
 
     @app.post("/retrievals")

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .events import validate_event
+from .storage import ImageDocumentStore
 
 
 DEFAULT_EMBEDDING_DIMENSION = 16
@@ -138,9 +139,15 @@ class InMemoryImageIndex:
 class ImageRetrievalPipeline:
     """Consumes schema-valid events and emits downstream retrieval events."""
 
-    def __init__(self, index: InMemoryImageIndex | None = None, source: str = "image-retrieval-service") -> None:
+    def __init__(
+        self,
+        index: InMemoryImageIndex | None = None,
+        source: str = "image-retrieval-service",
+        document_store: ImageDocumentStore | None = None,
+    ) -> None:
         self.index = index or InMemoryImageIndex()
         self.source = source
+        self.document_store = document_store or ImageDocumentStore()
         self.events: list[dict[str, Any]] = []
 
     def upload_image(
@@ -150,6 +157,7 @@ class ImageRetrievalPipeline:
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         event = _event("image.uploaded", self.source, {"image": image}, trace_id)
+        self.document_store.upsert_image(image)
         self.events.append(event)
         return event
 
@@ -157,19 +165,23 @@ class ImageRetrievalPipeline:
         upload_event = validate_event(upload_event)
         image = upload_event["payload"]["image"]
         self.index.add(image)
+        index_metadata = {
+            "index_name": DEFAULT_INDEX_NAME,
+            "embedding_model": DEFAULT_MODEL,
+            "embedding_dimension": self.index.embedding_dimension,
+            "indexed_at": _now(),
+        }
 
         event = _event(
             "image.indexed",
             self.source,
             {
                 "image_id": image["image_id"],
-                "index_name": DEFAULT_INDEX_NAME,
-                "embedding_model": DEFAULT_MODEL,
-                "embedding_dimension": self.index.embedding_dimension,
-                "indexed_at": _now(),
+                **index_metadata,
             },
             upload_event.get("trace_id"),
         )
+        self.document_store.mark_indexed(image["image_id"], index_metadata)
         self.events.append(event)
         return event
 

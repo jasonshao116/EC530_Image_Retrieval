@@ -3,7 +3,8 @@
 This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
 pipeline, the Push 4 REST API, the Push 5 synthetic event generator, and the
-Push 6 upload plus inference flow.
+Push 6 upload plus inference flow, and the Push 7 document database with
+annotation storage.
 
 The system models four core pipeline stages:
 
@@ -25,6 +26,8 @@ schema validation before events are accepted or emitted.
 - REST API for uploading images, searching images, and inspecting emitted events
 - Synthetic event generation for local testing and downstream consumers
 - Upload plus inference flow for image-query retrieval
+- Document-style image records with optional file-backed persistence
+- Annotation storage attached to each image document
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -121,13 +124,15 @@ and pull request using `.github/workflows/tests.yml`.
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
+- `/src/image_retrieval/storage.py`: Push 7 document database and annotation storage
 - `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
 - `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
-- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4 and Push 6
+- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4, Push 6, and Push 7
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
 - `/tests/test_push5_generator.py`: synthetic event generator unit tests
 - `/tests/test_push6_inference.py`: upload plus inference flow unit tests
+- `/tests/test_push7_storage.py`: document database and annotation storage tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -149,11 +154,17 @@ and pull request using `.github/workflows/tests.yml`.
 6. The Push 6 flow uploads a query image, indexes it, creates an image-based
    `retrieval.requested` event, and returns a `retrieval.completed` event with
    similar indexed images.
+7. The Push 7 document store persists image metadata, index metadata, and
+   human or model annotations as image-attached JSON documents.
 
 ## API Endpoints
 
 - `GET /health`: check service health and current in-memory index state
 - `POST /images`: upload image metadata and automatically index it
+- `GET /images`: list stored image documents
+- `GET /images/{image_id}`: fetch one stored image document
+- `POST /images/{image_id}/annotations`: attach an annotation to an image
+- `GET /images/{image_id}/annotations`: list annotations for an image
 - `POST /retrievals`: submit a text query and receive ranked image matches
 - `POST /inferences`: upload an image and run image-query retrieval in one flow
 - `GET /events`: list schema-valid events emitted since the API started
@@ -207,6 +218,20 @@ curl -X POST http://127.0.0.1:8000/inferences \
   }'
 ```
 
+Example annotation:
+
+```bash
+curl -X POST http://127.0.0.1:8000/images/80253575-f761-4a68-a20f-75a66dcf0c88/annotations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "campus-building",
+    "annotator": "reviewer@example.edu",
+    "confidence": 0.9,
+    "notes": "Brick academic building.",
+    "metadata": {"source": "manual-review"}
+  }'
+```
+
 ## Event Envelope
 
 Every event uses the same top-level envelope:
@@ -231,6 +256,8 @@ Every event uses the same top-level envelope:
   event streams from the CLI or Python API.
 - Push 6 added an upload plus inference flow that indexes a submitted image and
   immediately runs image-query retrieval against the current index.
+- Push 7 added a document-style image store with index metadata and image-level
+  annotation storage, exposed through the REST API.
 
 ## Assumptions
 
