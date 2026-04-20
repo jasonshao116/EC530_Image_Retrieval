@@ -1,11 +1,11 @@
 # EC530_Image_Retrieval
 
 This repository contains an event-driven image retrieval prototype. It combines
-the Push 2 event schema, the Push 3 executable validation and local retrieval
-pipeline, the Push 4 REST API, the Push 5 synthetic event generator, the Push 6
-upload plus inference flow, the Push 7 document database with annotation
-storage, the Push 8/9 embedding plus vector index services, the Push 10 query
-service plus CLI, and Push 11 idempotent event ingestion with malformed-event
+the event schema, the executable validation and local retrieval
+pipeline, the REST API, the synthetic event generator, the
+upload plus inference flow, the document database with annotation
+storage, the embedding plus vector index services, the query
+service plus CLI, and idempotent event ingestion with malformed-event
 handling. The final push adds deterministic failure injection and integration
 tests across the ingestion, API, and CLI paths.
 
@@ -302,26 +302,6 @@ Every event uses the same top-level envelope:
 - `trace_id`: optional identifier for correlating related events
 - `payload`: event-specific data
 
-## Implementation History
-
-- Push 2 added the shared event schema and example event documents.
-- Push 3 added executable validation, a local retrieval pipeline, a CLI demo,
-  and unit tests.
-- Push 4 added a FastAPI service with upload, retrieval, health, and event
-  inspection endpoints.
-- Push 5 added a synthetic event generator that emits schema-valid pipeline
-  event streams from the CLI or Python API.
-- Push 6 added an upload plus inference flow that indexes a submitted image and
-  immediately runs image-query retrieval against the current index.
-- Push 7 added a document-style image store with index metadata and image-level
-  annotation storage, exposed through the REST API.
-- Push 8 added a deterministic embedding service for text and image metadata.
-- Push 9 added an in-memory vector index service for cosine-similarity search.
-- Push 10 added a query service and CLI command for ranked text search.
-- Push 11 added idempotent event ingestion and structured malformed-event
-  handling for pipeline and API inputs.
-- The final push added failure injection hooks and integration tests for
-  ingestion retries, API 503 responses, and CLI query smoke coverage.
 
 ## Assumptions
 
