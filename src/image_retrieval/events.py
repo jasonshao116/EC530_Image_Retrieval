@@ -17,6 +17,27 @@ DEFAULT_SCHEMA_PATH = PROJECT_ROOT / "schemas" / "events.schema.json"
 class EventValidationError(ValueError):
     """Raised when an event does not match the repository event schema."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        event_name: str = "event",
+        path: str = "",
+        error_code: str = "invalid_event",
+    ) -> None:
+        super().__init__(message)
+        self.event_name = event_name
+        self.path = path
+        self.error_code = error_code
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "error_code": self.error_code,
+            "event_name": self.event_name,
+            "path": self.path,
+            "message": str(self),
+        }
+
 
 def load_schema(schema_path: Path | str = DEFAULT_SCHEMA_PATH) -> dict[str, Any]:
     """Load the JSON Schema used by all Push 3 event validation."""
@@ -38,6 +59,12 @@ def validate_event(
 ) -> dict[str, Any]:
     """Validate an event and return it unchanged when valid."""
 
+    if not isinstance(event, dict):
+        raise EventValidationError(
+            f"Invalid event: expected object, got {type(event).__name__}",
+            error_code="malformed_event",
+        )
+
     validator = Draft202012Validator(
         schema or load_schema(),
         format_checker=FormatChecker(),
@@ -48,6 +75,12 @@ def validate_event(
     except ValidationError as exc:
         path = ".".join(str(part) for part in exc.absolute_path)
         location = f" at {path}" if path else ""
-        raise EventValidationError(f"Invalid {event.get('event_name', 'event')}{location}: {exc.message}") from exc
+        event_name = event.get("event_name", "event")
+        raise EventValidationError(
+            f"Invalid {event_name}{location}: {exc.message}",
+            event_name=event_name,
+            path=path,
+            error_code="malformed_event",
+        ) from exc
 
     return event

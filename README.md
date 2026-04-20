@@ -4,8 +4,9 @@ This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
 pipeline, the Push 4 REST API, the Push 5 synthetic event generator, the Push 6
 upload plus inference flow, the Push 7 document database with annotation
-storage, the Push 8/9 embedding plus vector index services, and the Push 10
-query service plus CLI.
+storage, the Push 8/9 embedding plus vector index services, the Push 10 query
+service plus CLI, and Push 11 idempotent event ingestion with malformed-event
+handling.
 
 The system models four core pipeline stages:
 
@@ -32,6 +33,8 @@ schema validation before events are accepted or emitted.
 - Deterministic embedding service for text and image metadata
 - In-memory vector index service with cosine-similarity search
 - Query service and CLI command for running ranked searches from sample or JSON image data
+- Idempotent event ingestion that ignores duplicate event IDs without repeating side effects
+- Structured malformed-event errors for invalid event payloads
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -158,6 +161,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/tests/test_push7_storage.py`: document database and annotation storage tests
 - `/tests/test_push8_9_services.py`: embedding service and vector index service tests
 - `/tests/test_push10_query_cli.py`: query service and CLI tests
+- `/tests/test_push11_idempotency.py`: idempotency and malformed-event handling tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -187,6 +191,8 @@ and pull request using `.github/workflows/tests.yml`.
    similarity.
 10. The Push 10 query service wraps indexing and retrieval into a reusable
     search interface, with a CLI command for local text queries.
+11. The Push 11 ingestion boundary validates incoming events, deduplicates by
+    `event_id`, and returns structured malformed-event errors.
 
 ## API Endpoints
 
@@ -204,6 +210,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `POST /retrievals`: submit a text query and receive ranked image matches
 - `POST /inferences`: upload an image and run image-query retrieval in one flow
 - `GET /events`: list schema-valid events emitted since the API started
+- `POST /events`: ingest one event idempotently and emit downstream events when applicable
 
 Example upload:
 
@@ -268,6 +275,14 @@ curl -X POST http://127.0.0.1:8000/images/80253575-f761-4a68-a20f-75a66dcf0c88/a
   }'
 ```
 
+Example event ingestion:
+
+```bash
+curl -X POST http://127.0.0.1:8000/events \
+  -H "Content-Type: application/json" \
+  -d @examples/image.uploaded.json
+```
+
 ## Event Envelope
 
 Every event uses the same top-level envelope:
@@ -297,6 +312,8 @@ Every event uses the same top-level envelope:
 - Push 8 added a deterministic embedding service for text and image metadata.
 - Push 9 added an in-memory vector index service for cosine-similarity search.
 - Push 10 added a query service and CLI command for ranked text search.
+- Push 11 added idempotent event ingestion and structured malformed-event
+  handling for pipeline and API inputs.
 
 ## Assumptions
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .embedding import DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MODEL, EmbeddingService
-from .events import validate_event
+from .events import EventValidationError, validate_event
 from .storage import ImageDocumentStore
 from .vector_index import DEFAULT_INDEX_NAME, VectorIndexService
 
@@ -124,6 +124,7 @@ class ImageRetrievalPipeline:
         self.source = source
         self.document_store = document_store or ImageDocumentStore()
         self.events: list[dict[str, Any]] = []
+        self._processed_event_ids: set[str] = set()
 
     def upload_image(
         self,
@@ -159,6 +160,72 @@ class ImageRetrievalPipeline:
         self.document_store.mark_indexed(image["image_id"], index_metadata)
         self.events.append(event)
         return event
+
+    def process_event(self, event: Any) -> dict[str, Any]:
+        """Validate and process an incoming event idempotently.
+
+        Duplicate event IDs are acknowledged without repeating side effects.
+        Malformed events return a structured error object instead of raising.
+        """
+
+        try:
+            validated_event = validate_event(event)
+        except EventValidationError as exc:
+            return {
+                "status": "malformed",
+                "accepted": False,
+                "duplicate": False,
+                "error": exc.as_dict(),
+                "emitted_events": [],
+            }
+
+        event_id = validated_event["event_id"]
+        if event_id in self._processed_event_ids:
+            return {
+                "status": "duplicate",
+                "accepted": True,
+                "duplicate": True,
+                "event_id": event_id,
+                "event_name": validated_event["event_name"],
+                "emitted_events": [],
+            }
+
+        self._processed_event_ids.add(event_id)
+        event_name = validated_event["event_name"]
+        emitted_events: list[dict[str, Any]] = []
+
+        if event_name == "image.uploaded":
+            self.events.append(validated_event)
+            image = validated_event["payload"]["image"]
+            self.document_store.upsert_image(image)
+            emitted_events.append(self.index_uploaded_image(validated_event))
+        elif event_name == "retrieval.requested":
+            self.events.append(validated_event)
+            emitted_events.append(self.complete_retrieval(validated_event))
+        elif event_name in {"image.indexed", "retrieval.completed"}:
+            self.events.append(validated_event)
+        else:
+            return {
+                "status": "malformed",
+                "accepted": False,
+                "duplicate": False,
+                "error": {
+                    "error_code": "unsupported_event",
+                    "event_name": event_name,
+                    "path": "event_name",
+                    "message": f"Unsupported event: {event_name}",
+                },
+                "emitted_events": [],
+            }
+
+        return {
+            "status": "accepted",
+            "accepted": True,
+            "duplicate": False,
+            "event_id": event_id,
+            "event_name": event_name,
+            "emitted_events": emitted_events,
+        }
 
     def upload_and_infer(
         self,

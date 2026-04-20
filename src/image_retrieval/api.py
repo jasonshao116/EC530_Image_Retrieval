@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .events import EventValidationError
@@ -229,6 +229,14 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             "event_count": len(current_pipeline.events),
             "events": current_pipeline.events,
         }
+
+    @app.post("/events")
+    def ingest_event(event: Any = Body(...)) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        result = current_pipeline.process_event(event)
+        if result["status"] == "malformed":
+            raise HTTPException(status_code=422, detail=result["error"])
+        return result
 
     return app
 
