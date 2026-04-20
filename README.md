@@ -2,9 +2,9 @@
 
 This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
-pipeline, the Push 4 REST API, the Push 5 synthetic event generator, and the
-Push 6 upload plus inference flow, and the Push 7 document database with
-annotation storage.
+pipeline, the Push 4 REST API, the Push 5 synthetic event generator, the Push 6
+upload plus inference flow, the Push 7 document database with annotation
+storage, and the Push 8/9 embedding plus vector index services.
 
 The system models four core pipeline stages:
 
@@ -28,6 +28,8 @@ schema validation before events are accepted or emitted.
 - Upload plus inference flow for image-query retrieval
 - Document-style image records with optional file-backed persistence
 - Annotation storage attached to each image document
+- Deterministic embedding service for text and image metadata
+- In-memory vector index service with cosine-similarity search
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -123,6 +125,8 @@ and pull request using `.github/workflows/tests.yml`.
 - `/.github/workflows/tests.yml`: GitHub Actions workflow for validation and tests
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
+- `/src/image_retrieval/embedding.py`: Push 8 deterministic embedding service
+- `/src/image_retrieval/vector_index.py`: Push 9 vector index service
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
 - `/src/image_retrieval/storage.py`: Push 7 document database and annotation storage
 - `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
@@ -133,6 +137,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/tests/test_push5_generator.py`: synthetic event generator unit tests
 - `/tests/test_push6_inference.py`: upload plus inference flow unit tests
 - `/tests/test_push7_storage.py`: document database and annotation storage tests
+- `/tests/test_push8_9_services.py`: embedding service and vector index service tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -156,6 +161,10 @@ and pull request using `.github/workflows/tests.yml`.
    similar indexed images.
 7. The Push 7 document store persists image metadata, index metadata, and
    human or model annotations as image-attached JSON documents.
+8. The Push 8 embedding service converts text and image metadata into
+   deterministic vectors.
+9. The Push 9 vector index stores embeddings and ranks matches with cosine
+   similarity.
 
 ## API Endpoints
 
@@ -165,6 +174,11 @@ and pull request using `.github/workflows/tests.yml`.
 - `GET /images/{image_id}`: fetch one stored image document
 - `POST /images/{image_id}/annotations`: attach an annotation to an image
 - `GET /images/{image_id}/annotations`: list annotations for an image
+- `POST /embeddings/text`: embed text with the Push 8 embedding service
+- `POST /embeddings/image`: embed image metadata with the Push 8 embedding service
+- `GET /vector-index`: inspect Push 9 vector index metadata
+- `POST /vector-index`: upsert a vector into the Push 9 vector index
+- `POST /vector-index/search`: search the Push 9 vector index
 - `POST /retrievals`: submit a text query and receive ranked image matches
 - `POST /inferences`: upload an image and run image-query retrieval in one flow
 - `GET /events`: list schema-valid events emitted since the API started

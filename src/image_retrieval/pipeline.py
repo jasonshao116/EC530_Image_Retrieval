@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
-import math
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from .embedding import DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MODEL, EmbeddingService
 from .events import validate_event
 from .storage import ImageDocumentStore
-
-
-DEFAULT_EMBEDDING_DIMENSION = 16
-DEFAULT_INDEX_NAME = "image-embeddings-v1"
-DEFAULT_MODEL = "hash-token-embedding-v1"
+from .vector_index import DEFAULT_INDEX_NAME, VectorIndexService
 
 
 def _now() -> str:
@@ -41,59 +36,44 @@ def _event(
     return validate_event(event)
 
 
-def _tokens(value: str) -> list[str]:
-    return [
-        token.strip().lower()
-        for token in value.replace("/", " ").replace("-", " ").replace("_", " ").split()
-        if token.strip()
-    ]
-
-
-def _embed_text(value: str, dimension: int = DEFAULT_EMBEDDING_DIMENSION) -> list[float]:
-    vector = [0.0] * dimension
-    for token in _tokens(value):
-        digest = hashlib.sha256(token.encode("utf-8")).digest()
-        bucket = int.from_bytes(digest[:2], "big") % dimension
-        sign = 1 if digest[2] % 2 == 0 else -1
-        vector[bucket] += sign
-    return vector
-
-
-def _cosine_similarity(left: list[float], right: list[float]) -> float:
-    dot = sum(left_value * right_value for left_value, right_value in zip(left, right))
-    left_norm = math.sqrt(sum(value * value for value in left))
-    right_norm = math.sqrt(sum(value * value for value in right))
-    if left_norm == 0 or right_norm == 0:
-        return 0.0
-    return dot / (left_norm * right_norm)
-
-
 class InMemoryImageIndex:
     """Deterministic local index used for the demo, API, and tests."""
 
-    def __init__(self, embedding_dimension: int = DEFAULT_EMBEDDING_DIMENSION) -> None:
-        self.embedding_dimension = embedding_dimension
+    def __init__(
+        self,
+        embedding_dimension: int = DEFAULT_EMBEDDING_DIMENSION,
+        *,
+        embedding_service: EmbeddingService | None = None,
+        vector_index: VectorIndexService | None = None,
+    ) -> None:
+        self.embedding_service = embedding_service or EmbeddingService(dimension=embedding_dimension)
+        self.vector_index = vector_index or VectorIndexService(
+            dimension=self.embedding_service.dimension,
+            index_name=DEFAULT_INDEX_NAME,
+        )
+        self.embedding_dimension = self.embedding_service.dimension
         self._images: dict[str, dict[str, Any]] = {}
-        self._vectors: dict[str, list[float]] = {}
 
     def add(self, image: dict[str, Any]) -> None:
         image_id = image["image_id"]
-        searchable_text = self.searchable_text(image)
         self._images[image_id] = image
-        self._vectors[image_id] = _embed_text(searchable_text, self.embedding_dimension)
+        embedding = self.embedding_service.embed_image(image)
+        self.vector_index.upsert(
+            image_id,
+            embedding.vector,
+            metadata={
+                "storage_uri": image["storage_uri"],
+                "content_type": image["content_type"],
+                "tags": list(image.get("tags", [])),
+            },
+        )
 
     @property
     def image_count(self) -> int:
-        return len(self._images)
+        return self.vector_index.vector_count
 
     def searchable_text(self, image: dict[str, Any]) -> str:
-        return " ".join(
-            [
-                image.get("storage_uri", ""),
-                image.get("content_type", ""),
-                " ".join(image.get("tags", [])),
-            ]
-        )
+        return self.embedding_service.searchable_image_text(image)
 
     def search(
         self,
@@ -103,7 +83,7 @@ class InMemoryImageIndex:
         exclude_image_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.search_vector(
-            _embed_text(query, self.embedding_dimension),
+            self.embedding_service.embed_text(query).vector,
             top_k,
             exclude_image_id=exclude_image_id,
         )
@@ -115,25 +95,20 @@ class InMemoryImageIndex:
         *,
         exclude_image_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        scored_matches = [
-            (image_id, _cosine_similarity(query_vector, image_vector))
-            for image_id, image_vector in self._vectors.items()
-            if image_id != exclude_image_id
+        matches = self.vector_index.search(
+            query_vector,
+            top_k,
+            exclude_image_id=exclude_image_id,
+        )
+        return [
+            {
+                "image_id": match["image_id"],
+                "score": match["score"],
+                "rank": match["rank"],
+                "storage_uri": match["metadata"]["storage_uri"],
+            }
+            for match in matches
         ]
-        scored_matches.sort(key=lambda match: match[1], reverse=True)
-
-        results = []
-        for rank, (image_id, score) in enumerate(scored_matches[:top_k], start=1):
-            image = self._images[image_id]
-            results.append(
-                {
-                    "image_id": image_id,
-                    "score": round(score, 4),
-                    "rank": rank,
-                    "storage_uri": image["storage_uri"],
-                }
-            )
-        return results
 
 
 class ImageRetrievalPipeline:

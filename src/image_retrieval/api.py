@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .events import EventValidationError
 from .pipeline import ImageRetrievalPipeline
 from .storage import DocumentNotFoundError
+from .vector_index import VectorDimensionError
 
 
 class ImageMetadataRequest(BaseModel):
@@ -41,6 +42,26 @@ class AnnotationRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     notes: str | None = Field(default=None, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbeddingTextRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class EmbeddingImageRequest(BaseModel):
+    image: ImageMetadataRequest
+
+
+class VectorUpsertRequest(BaseModel):
+    image_id: str
+    vector: list[float] = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VectorSearchRequest(BaseModel):
+    vector: list[float] = Field(min_length=1)
+    top_k: int = Field(default=3, gt=0)
+    exclude_image_id: str | None = Field(default=None, min_length=1)
 
 
 def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
@@ -117,6 +138,50 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             "image_id": image_id,
             "annotation_count": len(annotations),
             "annotations": annotations,
+        }
+
+    @app.post("/embeddings/text")
+    def embed_text(request: EmbeddingTextRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        return current_pipeline.index.embedding_service.embed_text(request.text).as_dict()
+
+    @app.post("/embeddings/image")
+    def embed_image(request: EmbeddingImageRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        image = request.image.model_dump(exclude={"trace_id"})
+        return current_pipeline.index.embedding_service.embed_image(image).as_dict()
+
+    @app.get("/vector-index")
+    def vector_index_stats() -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        return current_pipeline.index.vector_index.stats()
+
+    @app.post("/vector-index")
+    def upsert_vector(request: VectorUpsertRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            return current_pipeline.index.vector_index.upsert(
+                request.image_id,
+                request.vector,
+                metadata=request.metadata,
+            )
+        except VectorDimensionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/vector-index/search")
+    def search_vectors(request: VectorSearchRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            results = current_pipeline.index.vector_index.search(
+                request.vector,
+                request.top_k,
+                exclude_image_id=request.exclude_image_id,
+            )
+        except VectorDimensionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "result_count": len(results),
+            "results": results,
         }
 
     @app.post("/retrievals")
