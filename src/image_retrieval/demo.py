@@ -10,6 +10,7 @@ from pathlib import Path
 from .events import EventValidationError, load_event, load_schema, validate_event
 from .generator import generate_event_stream, write_events
 from .pipeline import ImageRetrievalPipeline
+from .query import QueryService, load_images
 
 
 def _sample_images() -> list[dict[str, object]]:
@@ -91,6 +92,36 @@ def run_infer_demo(top_k: int) -> int:
     return 0
 
 
+def query_command(
+    *,
+    query_text: str,
+    top_k: int,
+    image_path: Path | None,
+    requested_by: str,
+    trace_id: str | None,
+    output_format: str,
+) -> int:
+    images = load_images(image_path) if image_path else _sample_images()
+    service = QueryService()
+    service.index_images(images, trace_id=trace_id)
+    result = service.query_text(
+        query_text,
+        top_k=top_k,
+        requested_by=requested_by,
+        trace_id=trace_id,
+    )
+
+    if output_format == "table":
+        print(f"query: {result['query']}")
+        print("rank\tscore\timage_id\tstorage_uri")
+        for match in result["results"]:
+            print(f"{match['rank']}\t{match['score']:.4f}\t{match['image_id']}\t{match['storage_uri']}")
+        return 0
+
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def generate_command(
     *,
     image_count: int,
@@ -125,6 +156,14 @@ def main() -> int:
     infer_parser = subparsers.add_parser("infer", help="run the Push 6 upload + inference flow")
     infer_parser.add_argument("--top-k", type=int, default=3)
 
+    query_parser = subparsers.add_parser("query", help="run the Push 10 query service")
+    query_parser.add_argument("query_text", help="text query to search for")
+    query_parser.add_argument("--top-k", type=int, default=3)
+    query_parser.add_argument("--images", type=Path, default=None, help="JSON file with image metadata records")
+    query_parser.add_argument("--requested-by", default="student@example.edu")
+    query_parser.add_argument("--trace-id", default="trace-push10-cli")
+    query_parser.add_argument("--format", choices=["json", "table"], default="table")
+
     generate_parser = subparsers.add_parser("generate", help="generate Push 5 synthetic events")
     generate_parser.add_argument("--images", type=int, default=3, help="number of uploaded images to generate")
     generate_parser.add_argument("--retrievals", type=int, default=2, help="number of retrieval requests to generate")
@@ -141,6 +180,15 @@ def main() -> int:
             return run_demo(args.query, args.top_k)
         if args.command == "infer":
             return run_infer_demo(args.top_k)
+        if args.command == "query":
+            return query_command(
+                query_text=args.query_text,
+                top_k=args.top_k,
+                image_path=args.images,
+                requested_by=args.requested_by,
+                trace_id=args.trace_id,
+                output_format=args.format,
+            )
         if args.command == "generate":
             return generate_command(
                 image_count=args.images,

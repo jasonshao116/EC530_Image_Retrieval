@@ -7,7 +7,7 @@ TOP_K ?= 3
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
 
-.PHONY: all install validate demo infer generate test openapi api clean
+.PHONY: all install validate demo infer query generate test openapi api clean
 
 all: validate test openapi
 
@@ -22,6 +22,9 @@ demo:
 
 infer:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m image_retrieval.demo infer --top-k $(TOP_K)
+
+query:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m image_retrieval.demo query "$(DEMO_QUERY)" --top-k $(TOP_K)
 
 generate:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m image_retrieval.demo generate --images 3 --retrievals 2 --top-k $(TOP_K) --seed 530 --format json

@@ -4,7 +4,8 @@ This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
 pipeline, the Push 4 REST API, the Push 5 synthetic event generator, the Push 6
 upload plus inference flow, the Push 7 document database with annotation
-storage, and the Push 8/9 embedding plus vector index services.
+storage, the Push 8/9 embedding plus vector index services, and the Push 10
+query service plus CLI.
 
 The system models four core pipeline stages:
 
@@ -30,6 +31,7 @@ schema validation before events are accepted or emitted.
 - Annotation storage attached to each image document
 - Deterministic embedding service for text and image metadata
 - In-memory vector index service with cosine-similarity search
+- Query service and CLI command for running ranked searches from sample or JSON image data
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -77,6 +79,22 @@ Run the Push 6 upload plus inference demo:
 
 ```bash
 make infer
+```
+
+Run the Push 10 query service from the CLI:
+
+```bash
+make query
+```
+
+Or query a JSON file containing an array of image metadata records:
+
+```bash
+PYTHONPATH=src python3 -m image_retrieval.demo query \
+  "brick campus" \
+  --images images.json \
+  --top-k 3 \
+  --format json
 ```
 
 Or write newline-delimited JSON for ingestion tools:
@@ -129,8 +147,9 @@ and pull request using `.github/workflows/tests.yml`.
 - `/src/image_retrieval/vector_index.py`: Push 9 vector index service
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
 - `/src/image_retrieval/storage.py`: Push 7 document database and annotation storage
+- `/src/image_retrieval/query.py`: Push 10 query service and image metadata loader
 - `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
-- `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
+- `/src/image_retrieval/demo.py`: CLI for validation, demos, generation, and queries
 - `/src/image_retrieval/api.py`: FastAPI REST API for Push 4, Push 6, and Push 7
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
@@ -138,6 +157,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/tests/test_push6_inference.py`: upload plus inference flow unit tests
 - `/tests/test_push7_storage.py`: document database and annotation storage tests
 - `/tests/test_push8_9_services.py`: embedding service and vector index service tests
+- `/tests/test_push10_query_cli.py`: query service and CLI tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -165,6 +185,8 @@ and pull request using `.github/workflows/tests.yml`.
    deterministic vectors.
 9. The Push 9 vector index stores embeddings and ranks matches with cosine
    similarity.
+10. The Push 10 query service wraps indexing and retrieval into a reusable
+    search interface, with a CLI command for local text queries.
 
 ## API Endpoints
 
@@ -272,6 +294,9 @@ Every event uses the same top-level envelope:
   immediately runs image-query retrieval against the current index.
 - Push 7 added a document-style image store with index metadata and image-level
   annotation storage, exposed through the REST API.
+- Push 8 added a deterministic embedding service for text and image metadata.
+- Push 9 added an in-memory vector index service for cosine-similarity search.
+- Push 10 added a query service and CLI command for ranked text search.
 
 ## Assumptions
 
