@@ -2,6 +2,7 @@
 
 from .embedding import EmbeddingResult, EmbeddingService
 from .events import EventValidationError, load_schema, validate_event
+from .failure import FailureInjectionError, FailureInjector
 from .generator import EventGenerator, generate_event_stream
 from .pipeline import ImageRetrievalPipeline, InMemoryImageIndex
 from .query import QueryService, load_images
@@ -14,6 +15,8 @@ __all__ = [
     "EmbeddingService",
     "EventValidationError",
     "EventGenerator",
+    "FailureInjectionError",
+    "FailureInjector",
     "ImageDocumentStore",
     "ImageRetrievalPipeline",
     "InMemoryImageIndex",

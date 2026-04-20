@@ -8,6 +8,7 @@ from typing import Any
 
 from .embedding import DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MODEL, EmbeddingService
 from .events import EventValidationError, validate_event
+from .failure import FailureInjectionError, FailureInjector
 from .storage import ImageDocumentStore
 from .vector_index import DEFAULT_INDEX_NAME, VectorIndexService
 
@@ -119,12 +120,17 @@ class ImageRetrievalPipeline:
         index: InMemoryImageIndex | None = None,
         source: str = "image-retrieval-service",
         document_store: ImageDocumentStore | None = None,
+        failure_injector: FailureInjector | None = None,
     ) -> None:
         self.index = index or InMemoryImageIndex()
         self.source = source
         self.document_store = document_store or ImageDocumentStore()
+        self.failure_injector = failure_injector or FailureInjector()
         self.events: list[dict[str, Any]] = []
         self._processed_event_ids: set[str] = set()
+
+    def _inject_failure(self, failure_point: str) -> None:
+        self.failure_injector.check(failure_point)
 
     def upload_image(
         self,
@@ -132,12 +138,14 @@ class ImageRetrievalPipeline:
         *,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
+        self._inject_failure("before_upload_image")
         event = _event("image.uploaded", self.source, {"image": image}, trace_id)
         self.document_store.upsert_image(image)
         self.events.append(event)
         return event
 
     def index_uploaded_image(self, upload_event: dict[str, Any]) -> dict[str, Any]:
+        self._inject_failure("before_index_image")
         upload_event = validate_event(upload_event)
         image = upload_event["payload"]["image"]
         self.index.add(image)
@@ -190,34 +198,50 @@ class ImageRetrievalPipeline:
                 "emitted_events": [],
             }
 
-        self._processed_event_ids.add(event_id)
         event_name = validated_event["event_name"]
         emitted_events: list[dict[str, Any]] = []
 
-        if event_name == "image.uploaded":
-            self.events.append(validated_event)
-            image = validated_event["payload"]["image"]
-            self.document_store.upsert_image(image)
-            emitted_events.append(self.index_uploaded_image(validated_event))
-        elif event_name == "retrieval.requested":
-            self.events.append(validated_event)
-            emitted_events.append(self.complete_retrieval(validated_event))
-        elif event_name in {"image.indexed", "retrieval.completed"}:
-            self.events.append(validated_event)
-        else:
+        try:
+            self._inject_failure(f"before_process_{event_name}")
+            if event_name == "image.uploaded":
+                self.events.append(validated_event)
+                image = validated_event["payload"]["image"]
+                self.document_store.upsert_image(image)
+                emitted_events.append(self.index_uploaded_image(validated_event))
+            elif event_name == "retrieval.requested":
+                self.events.append(validated_event)
+                emitted_events.append(self.complete_retrieval(validated_event))
+            elif event_name in {"image.indexed", "retrieval.completed"}:
+                self.events.append(validated_event)
+            else:
+                return {
+                    "status": "malformed",
+                    "accepted": False,
+                    "duplicate": False,
+                    "error": {
+                        "error_code": "unsupported_event",
+                        "event_name": event_name,
+                        "path": "event_name",
+                        "message": f"Unsupported event: {event_name}",
+                    },
+                    "emitted_events": [],
+                }
+        except FailureInjectionError as exc:
             return {
-                "status": "malformed",
+                "status": "failed",
                 "accepted": False,
                 "duplicate": False,
+                "event_id": event_id,
+                "event_name": event_name,
                 "error": {
-                    "error_code": "unsupported_event",
-                    "event_name": event_name,
-                    "path": "event_name",
-                    "message": f"Unsupported event: {event_name}",
+                    "error_code": "injected_failure",
+                    "failure_point": exc.failure_point,
+                    "message": str(exc),
                 },
                 "emitted_events": [],
             }
 
+        self._processed_event_ids.add(event_id)
         return {
             "status": "accepted",
             "accepted": True,
@@ -263,6 +287,7 @@ class ImageRetrievalPipeline:
         requested_by: str = "student@example.edu",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
+        self._inject_failure("before_request_retrieval")
         event = _event(
             "retrieval.requested",
             self.source,
@@ -286,6 +311,7 @@ class ImageRetrievalPipeline:
         requested_by: str = "student@example.edu",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
+        self._inject_failure("before_request_image_retrieval")
         event = _event(
             "retrieval.requested",
             self.source,
@@ -308,6 +334,7 @@ class ImageRetrievalPipeline:
         exclude_image_id: str | None = None,
         query_override: str | None = None,
     ) -> dict[str, Any]:
+        self._inject_failure("before_complete_retrieval")
         request_event = validate_event(request_event)
         payload = request_event["payload"]
         started_at = datetime.now(UTC)

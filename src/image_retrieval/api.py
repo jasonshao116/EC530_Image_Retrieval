@@ -8,6 +8,7 @@ from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .events import EventValidationError
+from .failure import FailureInjectionError
 from .pipeline import ImageRetrievalPipeline
 from .storage import DocumentNotFoundError
 from .vector_index import VectorDimensionError
@@ -72,6 +73,16 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
     )
     app.state.pipeline = pipeline or ImageRetrievalPipeline(source="push4-api")
 
+    def injected_failure_response(exc: FailureInjectionError) -> HTTPException:
+        return HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "injected_failure",
+                "failure_point": exc.failure_point,
+                "message": str(exc),
+            },
+        )
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         current_pipeline: ImageRetrievalPipeline = app.state.pipeline
@@ -91,6 +102,8 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             indexed_event = current_pipeline.index_uploaded_image(upload_event)
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except FailureInjectionError as exc:
+            raise injected_failure_response(exc) from exc
 
         return {
             "image_id": image["image_id"],
@@ -197,6 +210,8 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             completed_event = current_pipeline.complete_retrieval(requested_event)
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except FailureInjectionError as exc:
+            raise injected_failure_response(exc) from exc
 
         return {
             "request_event": requested_event,
@@ -216,6 +231,8 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
             )
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except FailureInjectionError as exc:
+            raise injected_failure_response(exc) from exc
 
         return {
             "image_id": image["image_id"],
@@ -236,6 +253,8 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
         result = current_pipeline.process_event(event)
         if result["status"] == "malformed":
             raise HTTPException(status_code=422, detail=result["error"])
+        if result["status"] == "failed":
+            raise HTTPException(status_code=503, detail=result["error"])
         return result
 
     return app

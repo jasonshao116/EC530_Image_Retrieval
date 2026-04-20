@@ -6,7 +6,8 @@ pipeline, the Push 4 REST API, the Push 5 synthetic event generator, the Push 6
 upload plus inference flow, the Push 7 document database with annotation
 storage, the Push 8/9 embedding plus vector index services, the Push 10 query
 service plus CLI, and Push 11 idempotent event ingestion with malformed-event
-handling.
+handling. The final push adds deterministic failure injection and integration
+tests across the ingestion, API, and CLI paths.
 
 The system models four core pipeline stages:
 
@@ -35,6 +36,7 @@ schema validation before events are accepted or emitted.
 - Query service and CLI command for running ranked searches from sample or JSON image data
 - Idempotent event ingestion that ignores duplicate event IDs without repeating side effects
 - Structured malformed-event errors for invalid event payloads
+- Deterministic failure injection hooks for resilience and integration testing
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -146,6 +148,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/.github/workflows/tests.yml`: GitHub Actions workflow for validation and tests
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
+- `/src/image_retrieval/failure.py`: failure injection helpers for resilience tests
 - `/src/image_retrieval/embedding.py`: Push 8 deterministic embedding service
 - `/src/image_retrieval/vector_index.py`: Push 9 vector index service
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
@@ -162,6 +165,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/tests/test_push8_9_services.py`: embedding service and vector index service tests
 - `/tests/test_push10_query_cli.py`: query service and CLI tests
 - `/tests/test_push11_idempotency.py`: idempotency and malformed-event handling tests
+- `/tests/test_final_integration.py`: failure injection and end-to-end integration tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -193,6 +197,8 @@ and pull request using `.github/workflows/tests.yml`.
     search interface, with a CLI command for local text queries.
 11. The Push 11 ingestion boundary validates incoming events, deduplicates by
     `event_id`, and returns structured malformed-event errors.
+12. The final push adds deterministic failure injection points and integration
+    coverage across event ingestion, API retrieval, and CLI query flows.
 
 ## API Endpoints
 
@@ -314,6 +320,8 @@ Every event uses the same top-level envelope:
 - Push 10 added a query service and CLI command for ranked text search.
 - Push 11 added idempotent event ingestion and structured malformed-event
   handling for pipeline and API inputs.
+- The final push added failure injection hooks and integration tests for
+  ingestion retries, API 503 responses, and CLI query smoke coverage.
 
 ## Assumptions
 
