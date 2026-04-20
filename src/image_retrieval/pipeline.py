@@ -77,13 +77,7 @@ class InMemoryImageIndex:
 
     def add(self, image: dict[str, Any]) -> None:
         image_id = image["image_id"]
-        searchable_text = " ".join(
-            [
-                image.get("storage_uri", ""),
-                image.get("content_type", ""),
-                " ".join(image.get("tags", [])),
-            ]
-        )
+        searchable_text = self.searchable_text(image)
         self._images[image_id] = image
         self._vectors[image_id] = _embed_text(searchable_text, self.embedding_dimension)
 
@@ -91,11 +85,39 @@ class InMemoryImageIndex:
     def image_count(self) -> int:
         return len(self._images)
 
-    def search(self, query: str, top_k: int) -> list[dict[str, Any]]:
-        query_vector = _embed_text(query, self.embedding_dimension)
+    def searchable_text(self, image: dict[str, Any]) -> str:
+        return " ".join(
+            [
+                image.get("storage_uri", ""),
+                image.get("content_type", ""),
+                " ".join(image.get("tags", [])),
+            ]
+        )
+
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        exclude_image_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.search_vector(
+            _embed_text(query, self.embedding_dimension),
+            top_k,
+            exclude_image_id=exclude_image_id,
+        )
+
+    def search_vector(
+        self,
+        query_vector: list[float],
+        top_k: int,
+        *,
+        exclude_image_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         scored_matches = [
             (image_id, _cosine_similarity(query_vector, image_vector))
             for image_id, image_vector in self._vectors.items()
+            if image_id != exclude_image_id
         ]
         scored_matches.sort(key=lambda match: match[1], reverse=True)
 
@@ -151,6 +173,34 @@ class ImageRetrievalPipeline:
         self.events.append(event)
         return event
 
+    def upload_and_infer(
+        self,
+        image: dict[str, Any],
+        *,
+        top_k: int = 3,
+        requested_by: str = "student@example.edu",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        upload_event = self.upload_image(image, trace_id=trace_id)
+        indexed_event = self.index_uploaded_image(upload_event)
+        request_event = self.request_image_retrieval(
+            image["storage_uri"],
+            top_k=top_k,
+            requested_by=requested_by,
+            trace_id=trace_id,
+        )
+        completed_event = self.complete_retrieval(
+            request_event,
+            exclude_image_id=image["image_id"],
+            query_override=self.index.searchable_text(image),
+        )
+        return {
+            "upload_event": upload_event,
+            "indexed_event": indexed_event,
+            "request_event": request_event,
+            "completed_event": completed_event,
+        }
+
     def request_retrieval(
         self,
         query_text: str,
@@ -174,11 +224,41 @@ class ImageRetrievalPipeline:
         self.events.append(event)
         return event
 
-    def complete_retrieval(self, request_event: dict[str, Any]) -> dict[str, Any]:
+    def request_image_retrieval(
+        self,
+        query_image_uri: str,
+        *,
+        top_k: int = 3,
+        requested_by: str = "student@example.edu",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        event = _event(
+            "retrieval.requested",
+            self.source,
+            {
+                "request_id": str(uuid.uuid4()),
+                "query_type": "image",
+                "query_image_uri": query_image_uri,
+                "top_k": top_k,
+                "requested_by": requested_by,
+            },
+            trace_id,
+        )
+        self.events.append(event)
+        return event
+
+    def complete_retrieval(
+        self,
+        request_event: dict[str, Any],
+        *,
+        exclude_image_id: str | None = None,
+        query_override: str | None = None,
+    ) -> dict[str, Any]:
         request_event = validate_event(request_event)
         payload = request_event["payload"]
         started_at = datetime.now(UTC)
-        results = self.index.search(payload["query_text"], payload["top_k"])
+        query = query_override or payload.get("query_text") or payload["query_image_uri"]
+        results = self.index.search(query, payload["top_k"], exclude_image_id=exclude_image_id)
         latency_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
 
         event = _event(

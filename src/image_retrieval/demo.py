@@ -66,6 +66,31 @@ def run_demo(query: str, top_k: int) -> int:
     return 0
 
 
+def run_infer_demo(top_k: int) -> int:
+    pipeline = ImageRetrievalPipeline()
+    trace_id = "trace-push6-inference-demo"
+
+    for image in _sample_images()[:2]:
+        upload_event = pipeline.upload_image(image, trace_id=trace_id)
+        pipeline.index_uploaded_image(upload_event)
+
+    result = pipeline.upload_and_infer(
+        {
+            "image_id": "f3726f40-6bb5-40b8-8eb0-c43c744d4f73",
+            "storage_uri": "s3://ec530-images/uploads/new-campus-building.jpg",
+            "content_type": "image/jpeg",
+            "width": 1800,
+            "height": 1200,
+            "uploaded_by": "student@example.edu",
+            "tags": ["campus", "brick", "outdoor"],
+        },
+        top_k=top_k,
+        trace_id=trace_id,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def generate_command(
     *,
     image_count: int,
@@ -97,6 +122,9 @@ def main() -> int:
     demo_parser.add_argument("--query", default="red brick campus building")
     demo_parser.add_argument("--top-k", type=int, default=3)
 
+    infer_parser = subparsers.add_parser("infer", help="run the Push 6 upload + inference flow")
+    infer_parser.add_argument("--top-k", type=int, default=3)
+
     generate_parser = subparsers.add_parser("generate", help="generate Push 5 synthetic events")
     generate_parser.add_argument("--images", type=int, default=3, help="number of uploaded images to generate")
     generate_parser.add_argument("--retrievals", type=int, default=2, help="number of retrieval requests to generate")
@@ -111,6 +139,8 @@ def main() -> int:
             return validate_command(args.paths)
         if args.command == "demo":
             return run_demo(args.query, args.top_k)
+        if args.command == "infer":
+            return run_infer_demo(args.top_k)
         if args.command == "generate":
             return generate_command(
                 image_count=args.images,

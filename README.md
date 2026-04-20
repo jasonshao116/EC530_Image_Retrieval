@@ -2,7 +2,8 @@
 
 This repository contains an event-driven image retrieval prototype. It combines
 the Push 2 event schema, the Push 3 executable validation and local retrieval
-pipeline, the Push 4 REST API, and the Push 5 synthetic event generator.
+pipeline, the Push 4 REST API, the Push 5 synthetic event generator, and the
+Push 6 upload plus inference flow.
 
 The system models four core pipeline stages:
 
@@ -23,6 +24,7 @@ schema validation before events are accepted or emitted.
 - CLI commands for validation and demo retrieval
 - REST API for uploading images, searching images, and inspecting emitted events
 - Synthetic event generation for local testing and downstream consumers
+- Upload plus inference flow for image-query retrieval
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -64,6 +66,12 @@ Generate a Push 5 synthetic event stream:
 
 ```bash
 make generate
+```
+
+Run the Push 6 upload plus inference demo:
+
+```bash
+make infer
 ```
 
 Or write newline-delimited JSON for ingestion tools:
@@ -115,10 +123,11 @@ and pull request using `.github/workflows/tests.yml`.
 - `/src/image_retrieval/pipeline.py`: deterministic in-memory retrieval pipeline
 - `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
 - `/src/image_retrieval/demo.py`: CLI for validation and demo retrieval
-- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4
+- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4 and Push 6
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
 - `/tests/test_push5_generator.py`: synthetic event generator unit tests
+- `/tests/test_push6_inference.py`: upload plus inference flow unit tests
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -137,12 +146,16 @@ and pull request using `.github/workflows/tests.yml`.
    `retrieval.completed` event with scored matches.
 5. The Push 5 generator can synthesize the same event flow as either a JSON
    array or newline-delimited JSON for repeatable local testing.
+6. The Push 6 flow uploads a query image, indexes it, creates an image-based
+   `retrieval.requested` event, and returns a `retrieval.completed` event with
+   similar indexed images.
 
 ## API Endpoints
 
 - `GET /health`: check service health and current in-memory index state
 - `POST /images`: upload image metadata and automatically index it
 - `POST /retrievals`: submit a text query and receive ranked image matches
+- `POST /inferences`: upload an image and run image-query retrieval in one flow
 - `GET /events`: list schema-valid events emitted since the API started
 
 Example upload:
@@ -175,6 +188,25 @@ curl -X POST http://127.0.0.1:8000/retrievals \
   }'
 ```
 
+Example upload plus inference:
+
+```bash
+curl -X POST http://127.0.0.1:8000/inferences \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_id": "f3726f40-6bb5-40b8-8eb0-c43c744d4f73",
+    "storage_uri": "s3://ec530-images/uploads/new-campus-building.jpg",
+    "content_type": "image/jpeg",
+    "width": 1800,
+    "height": 1200,
+    "uploaded_by": "student@example.edu",
+    "tags": ["campus", "brick", "outdoor"],
+    "top_k": 3,
+    "requested_by": "student@example.edu",
+    "trace_id": "trace-inference-demo"
+  }'
+```
+
 ## Event Envelope
 
 Every event uses the same top-level envelope:
@@ -197,6 +229,8 @@ Every event uses the same top-level envelope:
   inspection endpoints.
 - Push 5 added a synthetic event generator that emits schema-valid pipeline
   event streams from the CLI or Python API.
+- Push 6 added an upload plus inference flow that indexes a submitted image and
+  immediately runs image-query retrieval against the current index.
 
 ## Assumptions
 
@@ -207,5 +241,3 @@ the current design assumes an event-driven image retrieval workflow:
 2. The image is embedded and indexed for search.
 3. A user submits a retrieval query.
 4. The system returns ranked matches.
-
-

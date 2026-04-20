@@ -29,11 +29,16 @@ class RetrievalRequest(BaseModel):
     trace_id: str | None = Field(default=None, min_length=1)
 
 
+class UploadInferenceRequest(ImageMetadataRequest):
+    top_k: int = Field(default=3, gt=0)
+    requested_by: str = Field(default="student@example.edu", min_length=1)
+
+
 def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
     app = FastAPI(
         title="EC530 Image Retrieval API",
         version="1.0.0",
-        description="Push 4 REST API for the event-driven image retrieval pipeline.",
+        description="REST API for the event-driven image retrieval pipeline.",
     )
     app.state.pipeline = pipeline or ImageRetrievalPipeline(source="push4-api")
 
@@ -79,6 +84,25 @@ def create_app(pipeline: ImageRetrievalPipeline | None = None) -> FastAPI:
         return {
             "request_event": requested_event,
             "completed_event": completed_event,
+        }
+
+    @app.post("/inferences")
+    def upload_and_infer(request: UploadInferenceRequest) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        image = request.model_dump(exclude={"trace_id", "top_k", "requested_by"})
+        try:
+            result = current_pipeline.upload_and_infer(
+                image,
+                top_k=request.top_k,
+                requested_by=request.requested_by,
+                trace_id=request.trace_id,
+            )
+        except EventValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        return {
+            "image_id": image["image_id"],
+            **result,
         }
 
     @app.get("/events")
