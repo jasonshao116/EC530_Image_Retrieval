@@ -7,7 +7,7 @@ TOP_K ?= 3
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
 
-.PHONY: all install validate demo infer query generate test openapi api clean
+.PHONY: all install validate demo infer query generate test openapi api redis-worker redis-publish clean
 
 all: validate test openapi
 
@@ -37,6 +37,12 @@ openapi:
 
 api:
 	PYTHONPATH=$(PYTHONPATH) uvicorn image_retrieval.api:app --host $(API_HOST) --port $(API_PORT) --reload
+
+redis-worker:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m image_retrieval.worker
+
+redis-publish:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/publish_event.py examples/image.uploaded.json
 
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +

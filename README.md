@@ -7,7 +7,9 @@ upload plus inference flow, the document database with annotation
 storage, the embedding plus vector index services, the query
 service plus CLI, and idempotent event ingestion with malformed-event
 handling. The final push adds deterministic failure injection and integration
-tests across the ingestion, API, and CLI paths.
+tests across the ingestion, API, and CLI paths. The Redis push adds a
+Pub/Sub broker adapter and worker so the same schema-valid events can flow
+through Redis channels.
 
 The system models four core pipeline stages:
 
@@ -37,6 +39,7 @@ schema validation before events are accepted or emitted.
 - Idempotent event ingestion that ignores duplicate event IDs without repeating side effects
 - Structured malformed-event errors for invalid event payloads
 - Deterministic failure injection hooks for resilience and integration testing
+- Redis Pub/Sub broker adapter, worker loop, and event publisher script
 - Unit tests for the examples and retrieval pipeline
 
 ## Setup
@@ -74,19 +77,19 @@ Run the local retrieval demo:
 make demo
 ```
 
-Generate a Push 5 synthetic event stream:
+Generate a synthetic event stream:
 
 ```bash
 make generate
 ```
 
-Run the Push 6 upload plus inference demo:
+Run the upload plus inference demo:
 
 ```bash
 make infer
 ```
 
-Run the Push 10 query service from the CLI:
+Run the query service from the CLI:
 
 ```bash
 make query
@@ -120,10 +123,22 @@ Run the tests:
 make test
 ```
 
-Start the Push 4 API:
+Start the API:
 
 ```bash
 make api
+```
+
+Run the Redis worker after starting Redis locally:
+
+```bash
+make redis-worker
+```
+
+Publish a sample upload event into Redis from another terminal:
+
+```bash
+make redis-publish
 ```
 
 After the server starts, open the interactive API docs at:
@@ -148,6 +163,9 @@ and pull request using `.github/workflows/tests.yml`.
 - `/.github/workflows/tests.yml`: GitHub Actions workflow for validation and tests
 - `/schemas/events.schema.json`: the versioned JSON Schema for all supported events
 - `/src/image_retrieval/events.py`: JSON Schema loading and validation helpers
+- `/src/image_retrieval/broker.py`: event broker interface and in-memory test broker
+- `/src/image_retrieval/redis_broker.py`: Redis Pub/Sub adapter for schema-valid events
+- `/src/image_retrieval/worker.py`: Redis worker that processes subscribed events
 - `/src/image_retrieval/failure.py`: failure injection helpers for resilience tests
 - `/src/image_retrieval/embedding.py`: Push 8 deterministic embedding service
 - `/src/image_retrieval/vector_index.py`: Push 9 vector index service
@@ -165,7 +183,9 @@ and pull request using `.github/workflows/tests.yml`.
 - `/tests/test_push8_9_services.py`: embedding service and vector index service tests
 - `/tests/test_push10_query_cli.py`: query service and CLI tests
 - `/tests/test_push11_idempotency.py`: idempotency and malformed-event handling tests
+- `/tests/test_push12_redis_broker.py`: broker and Redis-worker handoff tests
 - `/tests/test_final_integration.py`: failure injection and end-to-end integration tests
+- `/scripts/publish_event.py`: helper script for publishing one event JSON file to Redis
 - `/Makefile`: common project commands for install, validation, tests, API, and cleanup
 - `/.gitignore`: local Python, cache, environment, and editor ignore rules
 - `/examples/image.uploaded.json`: sample upload event
@@ -199,6 +219,58 @@ and pull request using `.github/workflows/tests.yml`.
     `event_id`, and returns structured malformed-event errors.
 12. The final push adds deterministic failure injection points and integration
     coverage across event ingestion, API retrieval, and CLI query flows.
+13. The Redis worker subscribes to `image.uploaded` and `retrieval.requested`,
+    processes each event through the same pipeline boundary, and republishes
+    emitted downstream events such as `image.indexed` and
+    `retrieval.completed`.
+
+## Redis Pub/Sub
+
+Redis is used as the project message bus, not as the image document store or
+vector index. Each Redis channel is named after the event's `event_name`, so an
+`image.uploaded` event is published to the `image.uploaded` channel.
+
+Start Redis with Homebrew:
+
+```bash
+brew install redis
+brew services start redis
+redis-cli ping
+```
+
+Or start Redis with Docker:
+
+```bash
+docker run --name ec530-redis -p 6379:6379 redis:7
+```
+
+Run the worker:
+
+```bash
+make redis-worker
+```
+
+Publish one sample event:
+
+```bash
+make redis-publish
+```
+
+The Redis worker currently subscribes to:
+
+- `image.uploaded`
+- `retrieval.requested`
+
+It publishes downstream events emitted by the pipeline:
+
+- `image.indexed`
+- `retrieval.completed`
+
+This implementation intentionally keeps Redis behind a broker abstraction.
+Unit tests use the in-memory broker, while the real Redis adapter is used only
+when running the worker or publisher. Redis Pub/Sub is not durable, so a
+subscriber that is offline can miss messages. For a production version, Redis
+Streams or Kafka would be a stronger fit for replay and subscriber downtime.
 
 ## API Endpoints
 
