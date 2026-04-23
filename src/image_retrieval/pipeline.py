@@ -169,6 +169,16 @@ class ImageRetrievalPipeline:
         self.events.append(event)
         return event
 
+    def reindex_stored_images(self) -> int:
+        """Rebuild the in-memory vector index from persisted image documents."""
+
+        indexed_count = 0
+        for document in self.document_store.list_images():
+            image = document["image"]
+            self.index.add(image)
+            indexed_count += 1
+        return indexed_count
+
     def process_event(self, event: Any) -> dict[str, Any]:
         """Validate and process an incoming event idempotently.
 

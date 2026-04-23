@@ -9,7 +9,9 @@ from collections.abc import Iterable
 from typing import Any
 
 from .broker import EventBroker
+from .config import load_dotenv
 from .pipeline import ImageRetrievalPipeline
+from .storage import create_document_store_from_env
 
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
@@ -64,6 +66,7 @@ def run_worker(
 
 
 def main() -> None:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Run the Redis event worker.")
     parser.add_argument(
         "--redis-url",
@@ -81,7 +84,11 @@ def main() -> None:
     from .redis_broker import RedisEventBroker
 
     broker = RedisEventBroker(args.redis_url)
-    pipeline = ImageRetrievalPipeline(source="redis-worker")
+    pipeline = ImageRetrievalPipeline(
+        source="redis-worker",
+        document_store=create_document_store_from_env(),
+    )
+    pipeline.reindex_stored_images()
     run_worker(
         broker=broker,
         pipeline=pipeline,

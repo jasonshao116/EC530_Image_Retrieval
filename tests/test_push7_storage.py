@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from image_retrieval.api import create_app
 from image_retrieval.pipeline import ImageRetrievalPipeline
-from image_retrieval.storage import ImageDocumentStore
+from image_retrieval.storage import ImageDocumentStore, RedisImageDocumentStore, create_document_store_from_env
 
 
 IMAGE = {
@@ -21,6 +23,38 @@ IMAGE = {
     "uploaded_by": "student@example.edu",
     "tags": ["campus", "brick", "building"],
 }
+
+
+SECOND_IMAGE = {
+    "image_id": "f3726f40-6bb5-40b8-8eb0-c43c744d4f73",
+    "storage_uri": "s3://ec530-images/uploads/new-campus-building.jpg",
+    "content_type": "image/jpeg",
+    "width": 1800,
+    "height": 1200,
+    "uploaded_by": "student@example.edu",
+    "tags": ["campus", "brick", "outdoor"],
+}
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.sets: dict[str, set[str]] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        self.values[key] = value
+
+    def sadd(self, key: str, value: str) -> None:
+        self.sets.setdefault(key, set()).add(value)
+
+    def scard(self, key: str) -> int:
+        return len(self.sets.get(key, set()))
+
+    def smembers(self, key: str) -> set[str]:
+        return set(self.sets.get(key, set()))
 
 
 class DocumentStorageTests(unittest.TestCase):
@@ -57,6 +91,80 @@ class DocumentStorageTests(unittest.TestCase):
             self.assertEqual(document["image"]["storage_uri"], IMAGE["storage_uri"])
             self.assertEqual(document["annotations"][0]["label"], "campus-building")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))[0]["image_id"], IMAGE["image_id"])
+
+    def test_redis_store_round_trips_documents(self) -> None:
+        client = FakeRedis()
+        store = RedisImageDocumentStore(
+            "redis://example.invalid:6379/0",
+            namespace="test-images",
+            client=client,
+        )
+        store.upsert_image(IMAGE)
+        store.mark_indexed(
+            IMAGE["image_id"],
+            {
+                "index_name": "image-embeddings-v1",
+                "embedding_model": "hash-token-embedding-v1",
+                "embedding_dimension": 16,
+                "indexed_at": "2026-04-23T00:00:00Z",
+            },
+        )
+        store.add_annotation(
+            IMAGE["image_id"],
+            {
+                "label": "campus-building",
+                "annotator": "reviewer@example.edu",
+                "confidence": 0.95,
+            },
+        )
+
+        document = store.get_image(IMAGE["image_id"])
+        self.assertEqual(store.document_count, 1)
+        self.assertEqual(document["image"], IMAGE)
+        self.assertEqual(document["index"]["index_name"], "image-embeddings-v1")
+        self.assertEqual(document["annotations"][0]["label"], "campus-building")
+        self.assertEqual(store.list_images()[0]["image_id"], IMAGE["image_id"])
+
+    def test_store_factory_uses_redis_when_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "IMAGE_RETRIEVAL_DOCUMENT_STORE": "redis",
+                "REDIS_URL": "rediss://default:secret@example.redis-cloud.com:12345",
+                "REDIS_NAMESPACE": "ec530-test",
+            },
+            clear=False,
+        ):
+            store = create_document_store_from_env()
+
+        self.assertIsInstance(store, RedisImageDocumentStore)
+        self.assertEqual(store.namespace, "ec530-test")
+
+    def test_pipeline_reindexes_stored_images_for_search_after_restart(self) -> None:
+        store = ImageDocumentStore()
+        store.upsert_image(IMAGE)
+        store.upsert_image(SECOND_IMAGE)
+        pipeline = ImageRetrievalPipeline(source="test-reindex", document_store=store)
+
+        self.assertEqual(pipeline.index.image_count, 0)
+        indexed_count = pipeline.reindex_stored_images()
+
+        self.assertEqual(indexed_count, 2)
+        self.assertEqual(pipeline.index.image_count, 2)
+        results = pipeline.index.search("brick campus", top_k=2)
+        self.assertEqual(len(results), 2)
+
+    def test_api_reindexes_stored_images_on_startup(self) -> None:
+        store = ImageDocumentStore()
+        store.upsert_image(IMAGE)
+        pipeline = ImageRetrievalPipeline(source="test-api-reindex", document_store=store)
+
+        with TestClient(create_app(pipeline)) as client:
+            response = client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["stored_images"], 1)
+        self.assertEqual(response.json()["indexed_images"], 1)
 
 
 class AnnotationApiTests(unittest.TestCase):

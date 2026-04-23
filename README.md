@@ -129,7 +129,7 @@ Start the API:
 make api
 ```
 
-Run the Redis worker after starting Redis locally:
+Run the Redis worker after starting Redis locally or configuring Redis Cloud:
 
 ```bash
 make redis-worker
@@ -145,6 +145,12 @@ After the server starts, open the interactive API docs at:
 
 ```text
 http://127.0.0.1:8000/docs
+```
+
+Or open the browser upload page at:
+
+```text
+http://127.0.0.1:8000/
 ```
 
 Remove Python caches and test artifacts:
@@ -174,7 +180,7 @@ and pull request using `.github/workflows/tests.yml`.
 - `/src/image_retrieval/query.py`: Push 10 query service and image metadata loader
 - `/src/image_retrieval/generator.py`: Push 5 synthetic event generator
 - `/src/image_retrieval/demo.py`: CLI for validation, demos, generation, and queries
-- `/src/image_retrieval/api.py`: FastAPI REST API for Push 4, Push 6, and Push 7
+- `/src/image_retrieval/api.py`: FastAPI REST API and browser upload page for Push 4, Push 6, and Push 7
 - `/tests/test_push3_pipeline.py`: validation and pipeline unit tests
 - `/tests/test_push4_api.py`: API unit tests
 - `/tests/test_push5_generator.py`: synthetic event generator unit tests
@@ -226,8 +232,12 @@ and pull request using `.github/workflows/tests.yml`.
 
 ## Redis Pub/Sub
 
-Redis is used as the project message bus, not as the image document store or
-vector index. Each Redis channel is named after the event's `event_name`, so an
+Redis can be used in two ways:
+
+- As the project message bus for Pub/Sub event flow
+- As the image document database for stored image metadata, index metadata, and annotations
+
+Each Pub/Sub channel is named after the event's `event_name`, so an
 `image.uploaded` event is published to the `image.uploaded` channel.
 
 Start Redis with Homebrew:
@@ -243,6 +253,24 @@ Or start Redis with Docker:
 ```bash
 docker run --name ec530-redis -p 6379:6379 redis:7
 ```
+
+To use Redis Cloud as the document database, edit the local `.env` file:
+
+```text
+REDIS_URL=rediss://default:YOUR_PASSWORD@YOUR_HOST:YOUR_PORT
+IMAGE_RETRIEVAL_DOCUMENT_STORE=redis
+REDIS_NAMESPACE=ec530-image-retrieval
+```
+
+Then start the API:
+
+```bash
+make api
+```
+
+The API and Redis worker load `.env` automatically. Do not commit the Redis URL.
+It contains your database password. Local `.env` files are ignored by this
+repository.
 
 Run the worker:
 
@@ -268,13 +296,16 @@ It publishes downstream events emitted by the pipeline:
 
 This implementation intentionally keeps Redis behind a broker abstraction.
 Unit tests use the in-memory broker, while the real Redis adapter is used only
-when running the worker or publisher. Redis Pub/Sub is not durable, so a
+when running the worker or publisher. The Redis document store is optional and
+uses the same document API as the in-memory and file-backed stores. Redis Pub/Sub is not durable, so a
 subscriber that is offline can miss messages. For a production version, Redis
 Streams or Kafka would be a stronger fit for replay and subscriber downtime.
 
 ## API Endpoints
 
 - `GET /health`: check service health and current in-memory index state
+- `GET /`: open the browser upload page
+- `POST /uploads`: upload an image file from a multipart browser form, store it locally, index it, and run image-query retrieval
 - `POST /images`: upload image metadata and automatically index it
 - `GET /images`: list stored image documents
 - `GET /images/{image_id}`: fetch one stored image document
@@ -290,7 +321,17 @@ Streams or Kafka would be a stronger fit for replay and subscriber downtime.
 - `GET /events`: list schema-valid events emitted since the API started
 - `POST /events`: ingest one event idempotently and emit downstream events when applicable
 
-Example upload:
+Example browser-style file upload:
+
+```bash
+curl -X POST http://127.0.0.1:8000/uploads \
+  -F "file=@/path/to/your/image.jpg" \
+  -F "tags=campus, brick, outdoor" \
+  -F "uploaded_by=student@example.edu" \
+  -F "top_k=3"
+```
+
+Example metadata upload:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/images \

@@ -17,6 +17,9 @@ coverage.xml
 htmlcov/
 
 # Local runtime files
+data/uploads/
+.env
+.env.*
 *.db
 *.sqlite
 *.sqlite3
@@ -26,4 +29,3 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
-
