@@ -11,7 +11,12 @@ from fastapi.testclient import TestClient
 
 from image_retrieval.api import create_app
 from image_retrieval.pipeline import ImageRetrievalPipeline
-from image_retrieval.storage import ImageDocumentStore, RedisImageDocumentStore, create_document_store_from_env
+from image_retrieval.storage import (
+    ImageDocumentStore,
+    MongoImageDocumentStore,
+    RedisImageDocumentStore,
+    create_document_store_from_env,
+)
 
 
 IMAGE = {
@@ -55,6 +60,57 @@ class FakeRedis:
 
     def smembers(self, key: str) -> set[str]:
         return set(self.sets.get(key, set()))
+
+
+class FakeMongoCursor:
+    def __init__(self, documents: list[dict[str, object]]) -> None:
+        self.documents = documents
+
+    def sort(self, key: str, direction: int) -> list[dict[str, object]]:
+        reverse = direction < 0
+        return sorted(self.documents, key=lambda item: item[key], reverse=reverse)
+
+
+class FakeMongoCollection:
+    def __init__(self) -> None:
+        self.documents: dict[str, dict[str, object]] = {}
+
+    def count_documents(self, query: dict[str, object]) -> int:
+        return len(list(self._matching_documents(query)))
+
+    def find_one(self, query: dict[str, object], projection: dict[str, bool] | None = None) -> dict[str, object] | None:
+        del projection
+        return next(self._matching_documents(query), None)
+
+    def find(self, query: dict[str, object], projection: dict[str, bool] | None = None) -> FakeMongoCursor:
+        del projection
+        return FakeMongoCursor(list(self._matching_documents(query)))
+
+    def replace_one(self, query: dict[str, object], document: dict[str, object], upsert: bool = False) -> None:
+        del upsert
+        key = str(query.get("image_id") or document.get("image_id"))
+        self.documents[key] = dict(document)
+
+    def _matching_documents(self, query: dict[str, object]):
+        for document in self.documents.values():
+            if all(document.get(key) == value for key, value in query.items()):
+                yield dict(document)
+
+
+class FakeMongoDatabase:
+    def __init__(self) -> None:
+        self.collections: dict[str, FakeMongoCollection] = {}
+
+    def __getitem__(self, name: str) -> FakeMongoCollection:
+        return self.collections.setdefault(name, FakeMongoCollection())
+
+
+class FakeMongoClient:
+    def __init__(self) -> None:
+        self.databases: dict[str, FakeMongoDatabase] = {}
+
+    def __getitem__(self, name: str) -> FakeMongoDatabase:
+        return self.databases.setdefault(name, FakeMongoDatabase())
 
 
 class DocumentStorageTests(unittest.TestCase):
@@ -125,6 +181,39 @@ class DocumentStorageTests(unittest.TestCase):
         self.assertEqual(document["annotations"][0]["label"], "campus-building")
         self.assertEqual(store.list_images()[0]["image_id"], IMAGE["image_id"])
 
+    def test_mongo_store_round_trips_documents_and_image_id_set(self) -> None:
+        client = FakeMongoClient()
+        store = MongoImageDocumentStore(
+            "mongodb://example.invalid:27017",
+            database_name="test-db",
+            client=client,
+        )
+        store.upsert_image(IMAGE)
+        store.mark_indexed(
+            IMAGE["image_id"],
+            {
+                "index_name": "image-embeddings-v1",
+                "embedding_model": "hash-token-embedding-v1",
+                "embedding_dimension": 16,
+                "indexed_at": "2026-04-23T00:00:00Z",
+            },
+        )
+        store.add_annotation(
+            IMAGE["image_id"],
+            {
+                "label": "campus-building",
+                "annotator": "reviewer@example.edu",
+                "confidence": 0.95,
+            },
+        )
+
+        document = store.get_image(IMAGE["image_id"])
+        self.assertEqual(store.document_count, 1)
+        self.assertEqual(document["image"], IMAGE)
+        self.assertEqual(document["index"]["index_name"], "image-embeddings-v1")
+        self.assertEqual(document["annotations"][0]["label"], "campus-building")
+        self.assertEqual(store.list_images()[0]["image_id"], IMAGE["image_id"])
+
     def test_store_factory_uses_redis_when_configured(self) -> None:
         with patch.dict(
             os.environ,
@@ -139,6 +228,22 @@ class DocumentStorageTests(unittest.TestCase):
 
         self.assertIsInstance(store, RedisImageDocumentStore)
         self.assertEqual(store.namespace, "ec530-test")
+
+    def test_store_factory_uses_mongo_when_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "IMAGE_RETRIEVAL_DOCUMENT_STORE": "mongo",
+                "MONGODB_URI": "mongodb://example.invalid:27017",
+                "MONGODB_DATABASE": "ec530-test",
+            },
+            clear=False,
+        ):
+            with patch("image_retrieval.storage.MongoImageDocumentStore") as store_class:
+                create_document_store_from_env()
+
+        store_class.assert_called_once()
+        self.assertEqual(store_class.call_args.kwargs["database_name"], "ec530-test")
 
     def test_pipeline_reindexes_stored_images_for_search_after_restart(self) -> None:
         store = ImageDocumentStore()

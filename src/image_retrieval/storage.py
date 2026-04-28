@@ -219,14 +219,130 @@ class RedisImageDocumentStore:
         self.client.sadd(self.image_ids_key, image_id)
 
 
-def create_document_store_from_env() -> ImageDocumentStore | RedisImageDocumentStore:
+class MongoImageDocumentStore:
+    """MongoDB-backed image document store.
+
+    Image documents live in one collection, while image IDs are mirrored into a
+    second collection to preserve the existing image ID set behavior.
+    """
+
+    def __init__(
+        self,
+        mongo_uri: str,
+        *,
+        database_name: str = "image_retrieval",
+        image_collection: str = "images",
+        image_ids_collection: str = "image_ids",
+        client: Any | None = None,
+    ) -> None:
+        if client is None:
+            from pymongo import MongoClient
+
+            client = MongoClient(mongo_uri)
+        self.client = client
+        self.database_name = database_name
+        self.image_collection_name = image_collection
+        self.image_ids_collection_name = image_ids_collection
+        database = self.client[database_name]
+        self.images = database[image_collection]
+        self.image_ids = database[image_ids_collection]
+
+    @property
+    def document_count(self) -> int:
+        return int(self.image_ids.count_documents({}))
+
+    def upsert_image(self, image: dict[str, Any]) -> dict[str, Any]:
+        image_id = image["image_id"]
+        existing = self._get_document(image_id) or {}
+        now = _now()
+        document = {
+            "image_id": image_id,
+            "image": copy.deepcopy(image),
+            "index": existing.get("index"),
+            "annotations": existing.get("annotations", []),
+            "created_at": existing.get("created_at", now),
+            "updated_at": now,
+        }
+        self._save_document(document)
+        return copy.deepcopy(document)
+
+    def mark_indexed(self, image_id: str, index_metadata: dict[str, Any]) -> dict[str, Any]:
+        document = self._require_document(image_id)
+        document["index"] = copy.deepcopy(index_metadata)
+        document["updated_at"] = _now()
+        self._save_document(document)
+        return copy.deepcopy(document)
+
+    def get_image(self, image_id: str) -> dict[str, Any]:
+        return copy.deepcopy(self._require_document(image_id))
+
+    def list_images(self) -> list[dict[str, Any]]:
+        documents = list(self.images.find({}, {"_id": False}).sort("image_id", 1))
+        return [copy.deepcopy(document) for document in documents]
+
+    def add_annotation(
+        self,
+        image_id: str,
+        annotation: dict[str, Any],
+    ) -> dict[str, Any]:
+        document = self._require_document(image_id)
+        now = _now()
+        stored_annotation = {
+            "annotation_id": annotation.get("annotation_id", str(uuid.uuid4())),
+            "image_id": image_id,
+            "label": annotation["label"],
+            "annotator": annotation["annotator"],
+            "created_at": now,
+        }
+        if annotation.get("confidence") is not None:
+            stored_annotation["confidence"] = annotation["confidence"]
+        if annotation.get("notes"):
+            stored_annotation["notes"] = annotation["notes"]
+        if annotation.get("metadata"):
+            stored_annotation["metadata"] = copy.deepcopy(annotation["metadata"])
+
+        document["annotations"].append(stored_annotation)
+        document["updated_at"] = now
+        self._save_document(document)
+        return copy.deepcopy(stored_annotation)
+
+    def list_annotations(self, image_id: str) -> list[dict[str, Any]]:
+        document = self._require_document(image_id)
+        return [copy.deepcopy(annotation) for annotation in document["annotations"]]
+
+    def _get_document(self, image_id: str) -> dict[str, Any] | None:
+        return self.images.find_one({"image_id": image_id}, {"_id": False})
+
+    def _require_document(self, image_id: str) -> dict[str, Any]:
+        document = self._get_document(image_id)
+        if document is None:
+            raise DocumentNotFoundError(f"Image document not found: {image_id}")
+        return document
+
+    def _save_document(self, document: dict[str, Any]) -> None:
+        image_id = document["image_id"]
+        self.images.replace_one({"image_id": image_id}, copy.deepcopy(document), upsert=True)
+        self.image_ids.replace_one({"image_id": image_id}, {"image_id": image_id}, upsert=True)
+
+
+def create_document_store_from_env() -> ImageDocumentStore | RedisImageDocumentStore | MongoImageDocumentStore:
     """Create the configured document store.
 
-    Set IMAGE_RETRIEVAL_DOCUMENT_STORE=redis and REDIS_URL to use Redis Cloud.
+    Set IMAGE_RETRIEVAL_DOCUMENT_STORE=mongo and MONGODB_URI to use MongoDB.
     """
 
     load_dotenv()
     store_backend = os.getenv("IMAGE_RETRIEVAL_DOCUMENT_STORE", "memory").strip().lower()
+    if store_backend == "mongo":
+        mongo_uri = os.getenv("MONGODB_URI")
+        if not mongo_uri:
+            raise RuntimeError("MONGODB_URI is required when IMAGE_RETRIEVAL_DOCUMENT_STORE=mongo")
+        return MongoImageDocumentStore(
+            mongo_uri,
+            database_name=os.getenv("MONGODB_DATABASE", "image_retrieval"),
+            image_collection=os.getenv("MONGODB_IMAGE_COLLECTION", "images"),
+            image_ids_collection=os.getenv("MONGODB_IMAGE_IDS_COLLECTION", "image_ids"),
+        )
     if store_backend == "redis":
         redis_url = os.getenv("REDIS_URL")
         if not redis_url:

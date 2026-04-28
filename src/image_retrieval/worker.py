@@ -1,4 +1,4 @@
-"""Redis-backed worker for processing image retrieval events."""
+"""Redis Streams-backed worker for processing image retrieval events."""
 
 from __future__ import annotations
 
@@ -29,11 +29,12 @@ def process_and_publish(
     """Process one event and publish all downstream events."""
 
     result = pipeline.process_event(event)
-    if not result["accepted"]:
+    if result["accepted"]:
+        for emitted_event in result["emitted_events"]:
+            broker.publish(emitted_event)
+        broker.acknowledge(event)
         return result
 
-    for emitted_event in result["emitted_events"]:
-        broker.publish(emitted_event)
     return result
 
 
@@ -69,6 +70,12 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Run the Redis event worker.")
     parser.add_argument(
+        "--broker",
+        choices=["redis", "mongo"],
+        default=os.getenv("IMAGE_RETRIEVAL_EVENT_BROKER", "redis"),
+        help="Event broker backend. Defaults to IMAGE_RETRIEVAL_EVENT_BROKER or redis.",
+    )
+    parser.add_argument(
         "--redis-url",
         default=os.getenv("REDIS_URL", DEFAULT_REDIS_URL),
         help="Redis connection URL. Defaults to REDIS_URL or localhost Redis.",
@@ -81,9 +88,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    from .redis_broker import RedisEventBroker
+    if args.broker == "mongo":
+        from .broker import MongoEventBroker
 
-    broker = RedisEventBroker(args.redis_url)
+        mongo_uri = os.getenv("MONGODB_URI")
+        if not mongo_uri:
+            raise RuntimeError("MONGODB_URI is required when IMAGE_RETRIEVAL_EVENT_BROKER=mongo")
+        broker = MongoEventBroker(
+            mongo_uri,
+            database_name=os.getenv("MONGODB_DATABASE", "image_retrieval"),
+            events_collection=os.getenv("MONGODB_EVENTS_COLLECTION", "events"),
+        )
+    else:
+        from .redis_broker import RedisEventBroker
+
+        broker = RedisEventBroker(args.redis_url)
     pipeline = ImageRetrievalPipeline(
         source="redis-worker",
         document_store=create_document_store_from_env(),

@@ -10,7 +10,7 @@ from .embedding import DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MODEL, EmbeddingServ
 from .events import EventValidationError, validate_event
 from .failure import FailureInjectionError, FailureInjector
 from .storage import ImageDocumentStore
-from .vector_index import DEFAULT_INDEX_NAME, VectorIndexService
+from .vector_index import DEFAULT_INDEX_NAME, RedisVectorIndexService, VectorIndexService
 
 
 def _now() -> str:
@@ -45,7 +45,7 @@ class InMemoryImageIndex:
         embedding_dimension: int = DEFAULT_EMBEDDING_DIMENSION,
         *,
         embedding_service: EmbeddingService | None = None,
-        vector_index: VectorIndexService | None = None,
+        vector_index: VectorIndexService | RedisVectorIndexService | None = None,
     ) -> None:
         self.embedding_service = embedding_service or EmbeddingService(dimension=embedding_dimension)
         self.vector_index = vector_index or VectorIndexService(

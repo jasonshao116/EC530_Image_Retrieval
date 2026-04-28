@@ -16,11 +16,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .events import EventValidationError
+from .broker import EventBroker, MongoEventBroker
+from .embedding import DEFAULT_EMBEDDING_DIMENSION
+from .events import EventValidationError, validate_event
 from .failure import FailureInjectionError
-from .pipeline import ImageRetrievalPipeline
+from .pipeline import InMemoryImageIndex, ImageRetrievalPipeline
+from .redis_broker import DEFAULT_REDIS_URL, RedisEventBroker
 from .storage import DocumentNotFoundError, create_document_store_from_env
-from .vector_index import VectorDimensionError
+from .vector_index import VectorDimensionError, create_vector_index_from_env
 
 
 class ImageMetadataRequest(BaseModel):
@@ -72,6 +75,12 @@ class VectorSearchRequest(BaseModel):
     vector: list[float] = Field(min_length=1)
     top_k: int = Field(default=3, gt=0)
     exclude_image_id: str | None = Field(default=None, min_length=1)
+
+
+class ExistingImageRetrievalRequest(BaseModel):
+    top_k: int = Field(default=3, gt=0)
+    requested_by: str = Field(default="student@example.edu", min_length=1)
+    trace_id: str | None = Field(default=None, min_length=1)
 
 
 def _safe_filename(filename: str) -> str:
@@ -246,6 +255,7 @@ def _upload_page() -> str:
     }
     .thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #eef2f6; }
     .thumb span { font-size: .82rem; overflow-wrap: anywhere; color: #445266; }
+    .thumb button { min-height: 36px; font-size: .88rem; }
     @media (max-width: 760px) {
       main { padding: 24px 0; }
       header, .workspace { grid-template-columns: 1fr; display: grid; }
@@ -323,7 +333,11 @@ def _upload_page() -> str:
       image.loading = "lazy";
       const label = document.createElement("span");
       label.textContent = imageDocument.image.tags?.join(", ") || imageDocument.image.image_id;
-      card.append(image, label);
+      const action = document.createElement("button");
+      action.type = "button";
+      action.textContent = "Use Image";
+      action.addEventListener("click", () => reuseImage(imageDocument.image.image_id));
+      card.append(image, label, action);
       return card;
     }
 
@@ -348,12 +362,18 @@ def _upload_page() -> str:
     }
 
     function renderUpload(body) {
-      events.replaceChildren(
-        item(body.upload_event.event_name + " | " + body.upload_event.event_id, "event-name"),
-        item(body.indexed_event.event_name + " | " + body.indexed_event.event_id, "event-name"),
-        item(body.request_event.event_name + " | " + body.request_event.event_id, "event-name"),
-        item(body.completed_event.event_name + " | " + body.completed_event.event_id, "event-name"),
-      );
+      const eventItems = [];
+      if (body.upload_event) eventItems.push(item(body.upload_event.event_name + " | " + body.upload_event.event_id, "event-name"));
+      if (body.indexed_event) eventItems.push(item(body.indexed_event.event_name + " | " + body.indexed_event.event_id, "event-name"));
+      if (body.request_event) eventItems.push(item(body.request_event.event_name + " | " + body.request_event.event_id, "event-name"));
+      if (body.completed_event) eventItems.push(item(body.completed_event.event_name + " | " + body.completed_event.event_id, "event-name"));
+      events.replaceChildren(...eventItems);
+
+      if (!body.completed_event) {
+        matches.replaceChildren(item("Queued for async processing. Start the worker to produce retrieval results."));
+        return;
+      }
+
       const results = body.completed_event.payload.results || [];
       matches.replaceChildren(...(results.length ? results.map(matchCard) : [item("No other indexed images yet.")]));
     }
@@ -363,6 +383,28 @@ def _upload_page() -> str:
       const body = await response.json();
       const cards = body.images.map(imageCard);
       library.replaceChildren(...(cards.length ? cards : [item("No uploads yet.")]));
+    }
+
+    async function reuseImage(imageId) {
+      button.disabled = true;
+      statusBox.textContent = "Retrieving from existing image...";
+      try {
+        const topK = Number(new FormData(form).get("top_k") || 3);
+        const requestedBy = new FormData(form).get("uploaded_by") || "student@example.edu";
+        const response = await fetch("/images/" + encodeURIComponent(imageId) + "/retrievals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ top_k: topK, requested_by: requestedBy }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "Retrieval failed");
+        statusBox.textContent = "Reused " + imageId;
+        renderUpload(body);
+      } catch (error) {
+        statusBox.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
     }
 
     fileInput.addEventListener("change", () => {
@@ -405,11 +447,35 @@ def _upload_page() -> str:
 def create_app(
     pipeline: ImageRetrievalPipeline | None = None,
     upload_dir: Path | str | None = None,
+    broker: EventBroker | None = None,
 ) -> FastAPI:
+    configured_index = None
+    if pipeline is None:
+        configured_index = InMemoryImageIndex(
+            vector_index=create_vector_index_from_env(dimension=DEFAULT_EMBEDDING_DIMENSION),
+        )
     configured_pipeline = pipeline or ImageRetrievalPipeline(
+        index=configured_index,
         source="push4-api",
         document_store=create_document_store_from_env(),
     )
+    configured_broker = broker
+    if (
+        configured_broker is None
+        and pipeline is None
+    ):
+        event_backend = os.getenv("IMAGE_RETRIEVAL_EVENT_BROKER", "").lower()
+        if event_backend == "redis":
+            configured_broker = RedisEventBroker(os.getenv("REDIS_URL", DEFAULT_REDIS_URL))
+        elif event_backend == "mongo":
+            mongo_uri = os.getenv("MONGODB_URI")
+            if not mongo_uri:
+                raise RuntimeError("MONGODB_URI is required when IMAGE_RETRIEVAL_EVENT_BROKER=mongo")
+            configured_broker = MongoEventBroker(
+                mongo_uri,
+                database_name=os.getenv("MONGODB_DATABASE", "image_retrieval"),
+                events_collection=os.getenv("MONGODB_EVENTS_COLLECTION", "events"),
+            )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -424,6 +490,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.pipeline = configured_pipeline
+    app.state.broker = configured_broker
     configured_upload_dir = upload_dir or os.getenv("IMAGE_RETRIEVAL_UPLOAD_DIR", "data/uploads")
     app.state.upload_dir = Path(configured_upload_dir)
     app.state.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -439,11 +506,22 @@ def create_app(
             },
         )
 
+    def publish_event(event: dict[str, Any]) -> dict[str, Any]:
+        validated_event = validate_event(event)
+        broker: EventBroker | None = app.state.broker
+        if broker is not None:
+            broker.publish(validated_event)
+        return validated_event
+
+    def broker_enabled() -> bool:
+        return app.state.broker is not None
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         current_pipeline: ImageRetrievalPipeline = app.state.pipeline
         return {
             "status": "ok",
+            "processing_mode": "broker" if broker_enabled() else "in-process",
             "indexed_images": current_pipeline.index.image_count,
             "stored_images": current_pipeline.document_store.document_count,
             "event_count": len(current_pipeline.events),
@@ -517,6 +595,14 @@ def create_app(
         image = request.model_dump(exclude={"trace_id"})
         try:
             upload_event = current_pipeline.upload_image(image, trace_id=request.trace_id)
+            if broker_enabled():
+                upload_event = publish_event(upload_event)
+                return {
+                    "image_id": image["image_id"],
+                    "mode": "asynchronous",
+                    "upload_event": upload_event,
+                    "published_events": [upload_event],
+                }
             indexed_event = current_pipeline.index_uploaded_image(upload_event)
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -545,6 +631,41 @@ def create_app(
             return current_pipeline.document_store.get_image(image_id)
         except DocumentNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/images/{image_id}/retrievals")
+    def retrieve_from_existing_image(
+        image_id: str,
+        request: ExistingImageRetrievalRequest,
+    ) -> dict[str, Any]:
+        current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        try:
+            document = current_pipeline.document_store.get_image(image_id)
+            image = document["image"]
+            trace_id = request.trace_id or f"reuse-image-{image_id}"
+            request_event = current_pipeline.request_image_retrieval(
+                image["storage_uri"],
+                top_k=request.top_k,
+                requested_by=request.requested_by,
+                trace_id=trace_id,
+            )
+            completed_event = current_pipeline.complete_retrieval(
+                request_event,
+                exclude_image_id=image_id,
+                query_override=current_pipeline.index.searchable_text(image),
+            )
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except FailureInjectionError as exc:
+            raise injected_failure_response(exc) from exc
+
+        return {
+            "image_id": image_id,
+            "file_url": image["storage_uri"],
+            "request_event": request_event,
+            "completed_event": completed_event,
+        }
 
     @app.post("/images/{image_id}/annotations")
     def add_annotation(image_id: str, request: AnnotationRequest) -> dict[str, Any]:
@@ -625,6 +746,13 @@ def create_app(
                 requested_by=request.requested_by,
                 trace_id=request.trace_id,
             )
+            if broker_enabled():
+                requested_event = publish_event(requested_event)
+                return {
+                    "mode": "asynchronous",
+                    "request_event": requested_event,
+                    "published_events": [requested_event],
+                }
             completed_event = current_pipeline.complete_retrieval(requested_event)
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -641,12 +769,29 @@ def create_app(
         current_pipeline: ImageRetrievalPipeline = app.state.pipeline
         image = request.model_dump(exclude={"trace_id", "top_k", "requested_by"})
         try:
-            result = current_pipeline.upload_and_infer(
-                image,
-                top_k=request.top_k,
-                requested_by=request.requested_by,
-                trace_id=request.trace_id,
-            )
+            if broker_enabled():
+                upload_event = publish_event(current_pipeline.upload_image(image, trace_id=request.trace_id))
+                request_event = publish_event(
+                    current_pipeline.request_image_retrieval(
+                        image["storage_uri"],
+                        top_k=request.top_k,
+                        requested_by=request.requested_by,
+                        trace_id=request.trace_id,
+                    )
+                )
+                result = {
+                    "mode": "asynchronous",
+                    "upload_event": upload_event,
+                    "request_event": request_event,
+                    "published_events": [upload_event, request_event],
+                }
+            else:
+                result = current_pipeline.upload_and_infer(
+                    image,
+                    top_k=request.top_k,
+                    requested_by=request.requested_by,
+                    trace_id=request.trace_id,
+                )
         except EventValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except FailureInjectionError as exc:
@@ -668,6 +813,21 @@ def create_app(
     @app.post("/events")
     def ingest_event(event: Any = Body(...)) -> dict[str, Any]:
         current_pipeline: ImageRetrievalPipeline = app.state.pipeline
+        if broker_enabled():
+            try:
+                validated_event = publish_event(event)
+            except EventValidationError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            current_pipeline.events.append(validated_event)
+            return {
+                "status": "accepted",
+                "accepted": True,
+                "duplicate": False,
+                "event_id": validated_event["event_id"],
+                "event_name": validated_event["event_name"],
+                "published": True,
+                "emitted_events": [],
+            }
         result = current_pipeline.process_event(event)
         if result["status"] == "malformed":
             raise HTTPException(status_code=422, detail=result["error"])
