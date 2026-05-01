@@ -17,6 +17,7 @@ coverage.xml
 htmlcov/
 
 # Local runtime files
+data/faiss/
 data/uploads/
 .env
 .env.*

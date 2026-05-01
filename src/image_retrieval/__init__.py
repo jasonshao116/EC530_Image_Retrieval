@@ -7,7 +7,7 @@ from .generator import EventGenerator, generate_event_stream
 from .pipeline import ImageRetrievalPipeline, InMemoryImageIndex
 from .query import QueryService, load_images
 from .storage import DocumentNotFoundError, ImageDocumentStore
-from .vector_index import VectorDimensionError, VectorIndexService
+from .vector_index import FAISSVectorIndexService, VectorDimensionError, VectorIndexService
 
 __all__ = [
     "DocumentNotFoundError",
@@ -17,6 +17,7 @@ __all__ = [
     "EventGenerator",
     "FailureInjectionError",
     "FailureInjector",
+    "FAISSVectorIndexService",
     "ImageDocumentStore",
     "ImageRetrievalPipeline",
     "InMemoryImageIndex",

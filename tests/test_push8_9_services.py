@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from image_retrieval.api import create_app
 from image_retrieval.embedding import EmbeddingService
 from image_retrieval.pipeline import ImageRetrievalPipeline
-from image_retrieval.vector_index import RedisVectorIndexService, VectorDimensionError, VectorIndexService
+from image_retrieval.vector_index import (
+    FAISSVectorIndexService,
+    RedisVectorIndexService,
+    VectorDimensionError,
+    VectorIndexService,
+    create_vector_index_from_env,
+)
+
+try:
+    import faiss  # noqa: F401
+
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
 
 
 IMAGE = {
@@ -102,6 +118,48 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertEqual(results[0]["score"], 1.0)
         self.assertIn("image-a", client.hashes["test-vectors:vectors"])
         self.assertIn("image-a", client.hashes["test-vectors:embeddings"])
+
+    @unittest.skipUnless(FAISS_AVAILABLE, "faiss-cpu is not installed")
+    def test_faiss_vector_index_ranks_and_persists_vectors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "images.faiss"
+            metadata_path = Path(temp_dir) / "images.metadata.json"
+            index = FAISSVectorIndexService(
+                dimension=3,
+                index_path=index_path,
+                metadata_path=metadata_path,
+            )
+
+            index.upsert("image-a", [1.0, 0.0, 0.0], metadata={"storage_uri": "s3://a.jpg"})
+            index.upsert("image-b", [0.0, 1.0, 0.0], metadata={"storage_uri": "s3://b.jpg"})
+            results = index.search([1.0, 0.0, 0.0], top_k=2)
+
+            self.assertEqual(index.vector_count, 2)
+            self.assertEqual(results[0]["image_id"], "image-a")
+            self.assertEqual(results[0]["score"], 1.0)
+            self.assertTrue(index_path.exists())
+            self.assertTrue(metadata_path.exists())
+
+            reloaded = FAISSVectorIndexService(
+                dimension=3,
+                index_path=index_path,
+                metadata_path=metadata_path,
+            )
+            self.assertEqual(reloaded.vector_count, 2)
+            self.assertEqual(reloaded.search([1.0, 0.0, 0.0], top_k=1)[0]["image_id"], "image-a")
+
+    @unittest.skipUnless(FAISS_AVAILABLE, "faiss-cpu is not installed")
+    def test_vector_index_factory_can_create_faiss_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "IMAGE_RETRIEVAL_VECTOR_INDEX": "faiss",
+                "IMAGE_RETRIEVAL_FAISS_INDEX_PATH": str(Path(temp_dir) / "factory.faiss"),
+                "IMAGE_RETRIEVAL_FAISS_METADATA_PATH": str(Path(temp_dir) / "factory.json"),
+            }
+            with patch.dict("os.environ", env, clear=False):
+                index = create_vector_index_from_env(dimension=3)
+
+        self.assertIsInstance(index, FAISSVectorIndexService)
 
 
 class EmbeddingAndVectorApiTests(unittest.TestCase):

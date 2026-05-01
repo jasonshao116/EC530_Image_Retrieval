@@ -14,26 +14,41 @@ The pipeline emits four event types, all validated against
 
 ## Run The Pipeline
 
+The recommended project setup uses MongoDB, Redis, and FAISS together:
+
+- MongoDB stores image metadata, annotations, image IDs, and durable image records.
+- Redis stores asynchronous event streams for worker-based pipeline processing.
+- FAISS stores the embedding/vector search index used for similarity retrieval.
+- Uploaded image files are saved locally in `data/uploads/`; the databases store references to those files.
+
 Create `.env` in the project root:
 
 ```text
-MONGODB_URI=mongodb+srv://YOUR_USER:YOUR_PASSWORD@YOUR_CLUSTER/YOUR_DATABASE
+# MongoDB: image metadata and annotations
+MONGODB_URI=mongodb+srv://YOUR_USER:YOUR_PASSWORD@YOUR_CLUSTER/?appName=EC530
 MONGODB_DATABASE=ec530_image_retrieval
 IMAGE_RETRIEVAL_DOCUMENT_STORE=mongo
-IMAGE_RETRIEVAL_EVENT_BROKER=mongo
 
+# Redis: async event broker
 REDIS_URL=redis://default:YOUR_PASSWORD@YOUR_HOST:YOUR_PORT
-IMAGE_RETRIEVAL_VECTOR_INDEX=redis
-REDIS_VECTOR_NAMESPACE=ec530-image-retrieval
+REDIS_NAMESPACE=ec530-image-retrieval
+IMAGE_RETRIEVAL_EVENT_BROKER=redis
+
+# FAISS: embedding/vector database
+IMAGE_RETRIEVAL_VECTOR_INDEX=faiss
+IMAGE_RETRIEVAL_FAISS_INDEX_PATH=data/faiss/image_embeddings.faiss
+IMAGE_RETRIEVAL_FAISS_METADATA_PATH=data/faiss/image_embeddings.metadata.json
+
+# Local uploaded files
 IMAGE_RETRIEVAL_UPLOAD_DIR=data/uploads
 ```
 
 Install dependencies and start the app:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 make app
 ```
 
@@ -44,10 +59,13 @@ http://127.0.0.1:8000/
 ```
 
 The browser upload flow runs end to end: image metadata goes to MongoDB, vectors
-and embeddings go to Redis, the image is indexed, and matches are returned.
+and embeddings go to FAISS, the image is indexed, and matches are returned.
+For normal browser uploads, `make app` is enough.
 
-To process queued MongoDB events asynchronously, run the worker in a second
-terminal:
+To process queued Redis events asynchronously, run the worker in a second
+terminal. This is needed when testing event-driven endpoints such as `POST
+/images`, `POST /retrievals`, or `POST /events`; it is not required for the
+browser upload page.
 
 ```bash
 source .venv/bin/activate
@@ -56,13 +74,13 @@ make worker
 
 ## Storage
 
-- MongoDB stores image metadata documents, image IDs, annotations, and event streams.
-- Redis stores vectors and embeddings for similarity search.
-- Uploaded image files are saved locally under `data/uploads/`; databases store references to those files, not the image bytes.
-- On startup, the app loads stored MongoDB image documents and rebuilds the configured vector index.
-
-By default, tests and local demos can still use in-memory storage. The `.env`
-above enables the MongoDB + Redis split.
+- MongoDB is the source of truth for images shown in the upload UI.
+- Redis is the broker for queued pipeline events consumed by `make worker`.
+- FAISS persists the vector database in `data/faiss/image_embeddings.faiss` and
+  stores vector metadata in `data/faiss/image_embeddings.metadata.json`.
+- On startup, the app loads MongoDB image documents and rebuilds the FAISS index.
+- Local demos and tests can still use in-memory storage by overriding the same
+  environment variables.
 
 ## Upload UI
 
@@ -79,8 +97,8 @@ populate the vector index.
 
 ## Worker
 
-With `IMAGE_RETRIEVAL_EVENT_BROKER=mongo`, events are written to the MongoDB
-events collection. The worker consumes:
+With `IMAGE_RETRIEVAL_EVENT_BROKER=redis`, events are written to Redis streams.
+The worker consumes:
 
 - `image.uploaded`
 - `retrieval.requested`
@@ -96,7 +114,7 @@ Run it with:
 make worker
 ```
 
-`make redis-worker` remains as a compatibility alias for `make worker`.
+`make redis-worker` is a compatibility alias for `make worker`.
 
 ## Useful Commands
 
@@ -115,6 +133,7 @@ Check database connections:
 ```bash
 PYTHONPATH=src .venv/bin/python -c "from pymongo import MongoClient; from image_retrieval.config import load_dotenv; import os; load_dotenv(); print(MongoClient(os.environ['MONGODB_URI']).admin.command('ping'))"
 PYTHONPATH=src .venv/bin/python -c "import redis; from image_retrieval.config import load_dotenv; import os; load_dotenv(); print(redis.Redis.from_url(os.environ['REDIS_URL'], decode_responses=True).ping())"
+PYTHONPATH=src .venv/bin/python -c "from image_retrieval.vector_index import create_vector_index_from_env; print(create_vector_index_from_env(dimension=16).stats())"
 ```
 
 Open API docs after starting the app:
@@ -171,7 +190,7 @@ curl -X POST http://127.0.0.1:8000/retrievals \
 - `src/image_retrieval/api.py`: FastAPI app and browser upload UI
 - `src/image_retrieval/pipeline.py`: upload, indexing, retrieval, and re-indexing pipeline
 - `src/image_retrieval/storage.py`: in-memory, file-backed, Redis, and MongoDB document stores
-- `src/image_retrieval/vector_index.py`: in-memory and Redis-backed vector indexes
+- `src/image_retrieval/vector_index.py`: in-memory, Redis-backed, and FAISS-backed vector indexes
 - `src/image_retrieval/broker.py`: broker interface, in-memory broker, and MongoDB event broker
 - `src/image_retrieval/redis_broker.py`: Redis Streams event broker
 - `src/image_retrieval/worker.py`: event worker
